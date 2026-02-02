@@ -1,0 +1,45 @@
+# Java / Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Spring Boot
+*.log
+*.tmp
+*.swp
+
+# Maven
+.mvn/
+mvnw
+mvnw.cmd
+
+# Compiled files
+*.class
+*.jar
+*.war
+
+# Package Files
+*.nar
+
+# Log files
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+application-local.properties
+
