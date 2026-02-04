@@ -31,6 +31,7 @@ public class JwtTokenFilter extends OncePerRequestFilter {
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
         "/api/auth/refresh-token",  // Refresh token endpoint uses refresh token, not access token
+        "/api/health",  // Health check endpoint
         "/api/settings/customer-contact-number",  // GET only - public contact info
         "/api/settings/customer-support-email"   // GET only - public contact info
     );

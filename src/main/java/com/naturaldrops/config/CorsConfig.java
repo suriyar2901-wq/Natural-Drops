@@ -7,23 +7,27 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Arrays;
+import java.util.List;
 
 @Configuration
-public class CorsConfig implements WebMvcConfigurer {
+public class CorsConfig {
     
     @Bean
     public CorsFilter corsFilter() {
-        // ⚠️ AUTHENTICATION DISABLED - Allow all origins for testing
-        // Configured for mobile testing with Expo Go and physical devices
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = new CorsConfiguration();
         
-        // Allow all origins (includes Expo Go, mobile devices, and web browsers)
-        config.setAllowedOriginPatterns(Arrays.asList("*"));
+        // Production-safe origins:
+        // - Local dev web (Expo web / React Native web)
+        // - Vercel preview + production deployments
+        // Note: Native Expo Go apps do not send Origin headers, so CORS doesn't apply.
+        List<String> allowedOriginPatterns = Arrays.asList(
+                "http://localhost:8081",
+                "https://*.vercel.app"
+        );
+        config.setAllowedOriginPatterns(allowedOriginPatterns);
         
         // Allow all headers
         config.setAllowedHeaders(Arrays.asList("*"));
@@ -31,7 +35,7 @@ public class CorsConfig implements WebMvcConfigurer {
         // Allow all methods
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         
-        // Allow credentials
+        // Allow credentials (cookies / auth headers)
         config.setAllowCredentials(true);
         
         // Max age for preflight cache (1 hour)
@@ -43,17 +47,6 @@ public class CorsConfig implements WebMvcConfigurer {
         source.registerCorsConfiguration("/api/**", config);
         
         return new CorsFilter(source);
-    }
-    
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOriginPatterns("*") // Allow all origins
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
-                .allowedHeaders("*")
-                .allowCredentials(true)
-                .exposedHeaders("Authorization", "Content-Type", "X-Total-Count")
-                .maxAge(3600);
     }
     
     @Bean

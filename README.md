@@ -4,15 +4,15 @@
 RESTful API backend for Natural Drops Water Supply Management System built with Spring Boot 3.x and MySQL.
 
 ## Technologies
-- Java 17
-- Spring Boot 3.2.0
+- Java 8 (JDK 1.8)
+- Spring Boot 2.7.18
 - Spring Data JPA
-- MySQL 8.0+
+- PostgreSQL
 - Maven
 - Lombok
 
 ## Prerequisites
-- JDK 17 or higher
+- JDK 8 or higher (Java 1.8+)
 - Maven 3.6+
 - MySQL 8.0+
 - IDE (IntelliJ IDEA / Eclipse / VS Code)
@@ -24,9 +24,11 @@ RESTful API backend for Natural Drops Water Supply Management System built with 
 CREATE DATABASE natural_drops;
 ```
 
-Update `src/main/resources/application.properties` with your MySQL credentials:
+**Note**: This application uses PostgreSQL, not MySQL.
+
+Update `src/main/resources/application.properties` with your PostgreSQL credentials:
 ```properties
-spring.datasource.username=root
+spring.datasource.username=your_username
 spring.datasource.password=your_password
 ```
 
