@@ -86,17 +86,13 @@ public class JwtTokenFilter extends OncePerRequestFilter {
             // Check if user account is active (admin-controlled activation)
             // CRITICAL: Admin always has full access, regardless of isActive status
             // Only Seller and Buyer accounts are subject to isActive check
-            if (user.getRole() != User.UserRole.admin) {
-                // For Seller and Buyer: check isActive status
+            if (user.getRole() == User.UserRole.seller) {
                 if (user.getIsActive() == null) {
-                    // Legacy users without isActive - set to true for backward compatibility
                     user.setIsActive(true);
                     userRepository.save(user);
                 } else if (!user.getIsActive()) {
                     throw new UnauthorizedException("Your account is deactivated. Please contact customer care.");
                 }
-                
-                // Check if user status is APPROVED (only for Seller/Buyer)
                 if (user.getStatus() != null && user.getStatus() != User.UserStatus.APPROVED) {
                     throw new UnauthorizedException("Your account access is restricted. Please contact Customer Service for support.");
                 }

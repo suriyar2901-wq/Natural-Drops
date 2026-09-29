@@ -33,6 +33,20 @@ public class SettingsService {
             settingsMap.put("businessEmail", "");
             settingsMap.put("businessAddress", "");
         }
+
+        putDefault(settingsMap, "adminName", "Platform Admin");
+        putDefault(settingsMap, "adminMobile", "");
+        putDefault(settingsMap, "adminEmail", "");
+        putDefault(settingsMap, "supportPhone", settingsMap.get("businessPhone") != null ? settingsMap.get("businessPhone") : "");
+        putDefault(settingsMap, "supportWhatsapp", settingsMap.get("whatsappNumber") != null ? settingsMap.get("whatsappNumber") : "");
+        putDefault(settingsMap, "supportEmail", settingsMap.get("customerSupportEmail") != null ? settingsMap.get("customerSupportEmail") : "");
+        putDefault(settingsMap, "notifyActivation", "true");
+        putDefault(settingsMap, "notifyPayments", "true");
+        putDefault(settingsMap, "notifyFailedPayments", "true");
+        putDefault(settingsMap, "notifyExpiry", "true");
+        putDefault(settingsMap, "notifySevenDayReminder", "true");
+        putDefault(settingsMap, "planMonthlyAmount", "499.00");
+        putDefault(settingsMap, "planYearlyAmount", "5389.20");
         
         return settingsMap;
     }
@@ -67,6 +81,12 @@ public class SettingsService {
         setting.setUpdatedAt(LocalDateTime.now());
         
         settingRepository.save(setting);
+    }
+
+    private void putDefault(Map<String, String> settingsMap, String key, String value) {
+        if (!settingsMap.containsKey(key) || settingsMap.get(key) == null) {
+            settingsMap.put(key, value);
+        }
     }
 }
 

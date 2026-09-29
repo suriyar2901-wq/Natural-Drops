@@ -1,5 +1,7 @@
 package com.naturaldrops.entity;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import javax.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -65,6 +67,14 @@ public class MenuItem {
     
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal rate;
+
+    @Column(name = "seller_id")
+    private Long sellerId;
+
+    /** Shop name for admin product lists. Not stored on the product row. */
+    @Transient
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String sellerName;
     
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

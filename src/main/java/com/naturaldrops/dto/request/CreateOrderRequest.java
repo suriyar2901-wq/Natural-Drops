@@ -25,6 +25,14 @@ public class CreateOrderRequest {
     
     @NotNull(message = "Total is required")
     private BigDecimal total;
+
+    /** yyyy-MM-dd. Any date from today onward. Past dates are rejected. */
+    private String scheduledDeliveryDate;
+
+    /** HH:mm */
+    private String deliveryTime;
+
+    private String note;
     
     @NotEmpty(message = "Order must contain at least one item")
     private List<OrderItemRequest> items;

@@ -4,7 +4,9 @@ import com.naturaldrops.dto.response.ApiResponse;
 import com.naturaldrops.entity.MenuItem;
 import com.naturaldrops.entity.ProductImage;
 import com.naturaldrops.entity.ProductVideo;
+import com.naturaldrops.entity.User;
 import com.naturaldrops.service.MenuService;
+import javax.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,14 +23,19 @@ public class MenuController {
     private final MenuService menuService;
     
     @GetMapping
-    public ResponseEntity<ApiResponse<List<MenuItem>>> getAllMenuItems() {
-        List<MenuItem> menuItems = menuService.getAllMenuItems();
+    public ResponseEntity<ApiResponse<List<MenuItem>>> getAllMenuItems(HttpServletRequest request) {
+        User currentUser = (User) request.getAttribute("currentUser");
+        List<MenuItem> menuItems = menuService.getMenuItemsForUser(currentUser);
         return ResponseEntity.ok(ApiResponse.success(menuItems));
     }
     
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<MenuItem>> getMenuItemById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<MenuItem>> getMenuItemById(@PathVariable Long id, HttpServletRequest request) {
         MenuItem menuItem = menuService.getMenuItemById(id);
+        User currentUser = (User) request.getAttribute("currentUser");
+        if (currentUser != null && currentUser.getRole() == User.UserRole.admin) {
+            menuService.attachSellerName(menuItem);
+        }
         return ResponseEntity.ok(ApiResponse.success(menuItem));
     }
     
@@ -39,20 +46,23 @@ public class MenuController {
     }
     
     @GetMapping("/low-stock")
-    public ResponseEntity<ApiResponse<List<MenuItem>>> getLowStockItems() {
-        List<MenuItem> menuItems = menuService.getLowStockItems();
+    public ResponseEntity<ApiResponse<List<MenuItem>>> getLowStockItems(HttpServletRequest request) {
+        User currentUser = (User) request.getAttribute("currentUser");
+        List<MenuItem> menuItems = menuService.getLowStockItems(currentUser);
         return ResponseEntity.ok(ApiResponse.success(menuItems));
     }
     
     @PostMapping
-    public ResponseEntity<ApiResponse<MenuItem>> createMenuItem(@RequestBody MenuItem menuItem) {
-        MenuItem createdItem = menuService.createMenuItem(menuItem);
+    public ResponseEntity<ApiResponse<MenuItem>> createMenuItem(@RequestBody MenuItem menuItem, HttpServletRequest request) {
+        User currentUser = (User) request.getAttribute("currentUser");
+        MenuItem createdItem = menuService.createMenuItem(menuItem, currentUser);
         return ResponseEntity.ok(ApiResponse.success("Menu item created successfully", createdItem));
     }
     
     @PutMapping("/{id}")
-    public ResponseEntity<ApiResponse<MenuItem>> updateMenuItem(@PathVariable Long id, @RequestBody MenuItem menuItem) {
-        MenuItem updatedItem = menuService.updateMenuItem(id, menuItem);
+    public ResponseEntity<ApiResponse<MenuItem>> updateMenuItem(@PathVariable Long id, @RequestBody MenuItem menuItem, HttpServletRequest request) {
+        User currentUser = (User) request.getAttribute("currentUser");
+        MenuItem updatedItem = menuService.updateMenuItem(id, menuItem, currentUser);
         return ResponseEntity.ok(ApiResponse.success("Menu item updated successfully", updatedItem));
     }
     
@@ -69,8 +79,9 @@ public class MenuController {
     }
     
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Object>> deleteMenuItem(@PathVariable Long id) {
-        menuService.deleteMenuItem(id);
+    public ResponseEntity<ApiResponse<Object>> deleteMenuItem(@PathVariable Long id, HttpServletRequest request) {
+        User currentUser = (User) request.getAttribute("currentUser");
+        menuService.deleteMenuItem(id, currentUser);
         return ResponseEntity.ok(ApiResponse.success("Menu item deleted successfully", null));
     }
     

@@ -3,18 +3,26 @@ package com.naturaldrops.service;
 import com.naturaldrops.entity.MenuItem;
 import com.naturaldrops.entity.ProductImage;
 import com.naturaldrops.entity.ProductVideo;
+import com.naturaldrops.entity.Seller;
 import com.naturaldrops.entity.StockHistory;
+import com.naturaldrops.entity.User;
+import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
 import com.naturaldrops.repository.MenuItemRepository;
 import com.naturaldrops.repository.ProductImageRepository;
 import com.naturaldrops.repository.ProductVideoRepository;
+import com.naturaldrops.repository.SellerRepository;
 import com.naturaldrops.repository.StockHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -24,10 +32,34 @@ public class MenuService {
     private final ProductImageRepository productImageRepository;
     private final ProductVideoRepository productVideoRepository;
     private final StockHistoryRepository stockHistoryRepository;
+    private final SellerNetworkService sellerNetworkService;
+    private final SellerRepository sellerRepository;
     
     @Transactional(readOnly = true)
     public List<MenuItem> getAllMenuItems() {
         return menuItemRepository.findAllWithMedia();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MenuItem> getMenuItemsForUser(User user) {
+        if (user == null || user.getRole() == User.UserRole.admin) {
+            List<MenuItem> items = getAllMenuItems();
+            if (user != null && user.getRole() == User.UserRole.admin) {
+                attachSellerNames(items);
+            }
+            return items;
+        }
+        if (user.getRole() == User.UserRole.seller) {
+            Seller seller = sellerNetworkService.findSellerForUser(user);
+            if (seller == null) {
+                return java.util.Collections.emptyList();
+            }
+            return menuItemRepository.findBySellerIdWithMedia(seller.getId());
+        }
+        if (user.getLinkedSellerId() != null) {
+            return menuItemRepository.findBySellerIdWithMedia(user.getLinkedSellerId());
+        }
+        return menuItemRepository.findUnassignedWithMedia();
     }
     
     public MenuItem getMenuItemById(Long id) {
@@ -39,12 +71,58 @@ public class MenuService {
         return menuItemRepository.findByCategoryWithMedia(category);
     }
     
-    public List<MenuItem> getLowStockItems() {
-        return menuItemRepository.findLowStockItemsWithMedia();
+    public List<MenuItem> getLowStockItems(User user) {
+        List<MenuItem> items = menuItemRepository.findLowStockItemsWithMedia();
+        if (user != null && user.getRole() == User.UserRole.admin) {
+            attachSellerNames(items);
+        }
+        return items;
+    }
+
+    public void attachSellerName(MenuItem item) {
+        if (item == null) return;
+        attachSellerNames(java.util.Collections.singletonList(item));
+    }
+
+    private void attachSellerNames(List<MenuItem> items) {
+        if (items == null || items.isEmpty()) return;
+        Set<Long> sellerIds = new HashSet<Long>();
+        for (MenuItem item : items) {
+            if (item.getSellerId() != null) {
+                sellerIds.add(item.getSellerId());
+            }
+        }
+        if (sellerIds.isEmpty()) return;
+        Map<Long, String> names = new HashMap<Long, String>();
+        for (Seller seller : sellerRepository.findAllById(sellerIds)) {
+            names.put(seller.getId(), sellerDisplayName(seller));
+        }
+        for (MenuItem item : items) {
+            if (item.getSellerId() != null) {
+                item.setSellerName(names.get(item.getSellerId()));
+            }
+        }
+    }
+
+    private String sellerDisplayName(Seller seller) {
+        if (seller.getBusinessName() != null && !seller.getBusinessName().trim().isEmpty()) {
+            return seller.getBusinessName().trim();
+        }
+        if (seller.getOwnerName() != null && !seller.getOwnerName().trim().isEmpty()) {
+            return seller.getOwnerName().trim();
+        }
+        return seller.getSellerCode();
     }
     
     @Transactional
-    public MenuItem createMenuItem(MenuItem menuItem) {
+    public MenuItem createMenuItem(MenuItem menuItem, User currentUser) {
+        if (currentUser != null && currentUser.getRole() == User.UserRole.seller) {
+            Seller seller = sellerNetworkService.findSellerForUser(currentUser);
+            if (seller == null) {
+                throw new BadRequestException("Seller profile is not ready. Complete company details first.");
+            }
+            menuItem.setSellerId(seller.getId());
+        }
         menuItem.setCreatedAt(LocalDateTime.now());
         menuItem.setUpdatedAt(LocalDateTime.now());
         if (menuItem.getLowStockThreshold() == null) {
@@ -56,8 +134,9 @@ public class MenuService {
     }
     
     @Transactional
-    public MenuItem updateMenuItem(Long id, MenuItem menuItemDetails) {
+    public MenuItem updateMenuItem(Long id, MenuItem menuItemDetails, User currentUser) {
         MenuItem menuItem = getMenuItemById(id);
+        assertCanManage(menuItem, currentUser);
         
         menuItem.setName(menuItemDetails.getName());
         menuItem.setCategory(menuItemDetails.getCategory());
@@ -116,13 +195,18 @@ public class MenuService {
     @Transactional
     public void deductStock(Long menuItemId, Integer quantity, Long orderId, String changedBy) {
         MenuItem menuItem = getMenuItemById(menuItemId);
-        Integer quantityBefore = menuItem.getStockQuantity();
-        
-        if (quantityBefore < quantity) {
-            throw new IllegalStateException("Insufficient stock for menu item: " + menuItem.getName());
+        Integer quantityBefore = menuItem.getStockQuantity() == null ? 0 : menuItem.getStockQuantity();
+        int requested = quantity == null ? 0 : quantity;
+
+        if (requested <= 0) {
+            return;
+        }
+        if (quantityBefore < requested) {
+            throw new IllegalStateException("Insufficient stock for menu item: " + menuItem.getName()
+                    + ". Available: " + quantityBefore + ", requested: " + requested);
         }
         
-        menuItem.setStockQuantity(quantityBefore - quantity);
+        menuItem.setStockQuantity(quantityBefore - requested);
         menuItem.setUpdatedAt(LocalDateTime.now());
         menuItemRepository.save(menuItem);
         
@@ -131,13 +215,46 @@ public class MenuService {
         history.setMenuItemId(menuItemId);
         history.setOrderId(orderId);
         history.setChangeType(StockHistory.ChangeType.order_confirmed);
-        history.setQuantityChange(-quantity);
+        history.setQuantityChange(-requested);
         history.setQuantityBefore(quantityBefore);
-        history.setQuantityAfter(quantityBefore - quantity);
+        history.setQuantityAfter(quantityBefore - requested);
         history.setChangedBy(changedBy);
         history.setChangedAt(LocalDateTime.now());
         history.setNotes("Stock deducted for order #" + orderId);
         stockHistoryRepository.save(history);
+    }
+
+    /**
+     * Deducts up to the available stock and never fails the order when stock is short.
+     * Returns the quantity actually deducted.
+     */
+    @Transactional
+    public int deductAvailableStock(Long menuItemId, Integer quantity, Long orderId, String changedBy) {
+        MenuItem menuItem = getMenuItemById(menuItemId);
+        int quantityBefore = menuItem.getStockQuantity() == null ? 0 : menuItem.getStockQuantity();
+        int requested = quantity == null ? 0 : quantity;
+        int deducted = Math.min(Math.max(quantityBefore, 0), Math.max(requested, 0));
+        if (deducted <= 0) {
+            return 0;
+        }
+
+        menuItem.setStockQuantity(quantityBefore - deducted);
+        menuItem.setUpdatedAt(LocalDateTime.now());
+        menuItemRepository.save(menuItem);
+
+        StockHistory history = new StockHistory();
+        history.setMenuItemId(menuItemId);
+        history.setOrderId(orderId);
+        history.setChangeType(StockHistory.ChangeType.order_confirmed);
+        history.setQuantityChange(-deducted);
+        history.setQuantityBefore(quantityBefore);
+        history.setQuantityAfter(quantityBefore - deducted);
+        history.setChangedBy(changedBy);
+        history.setChangedAt(LocalDateTime.now());
+        history.setNotes("Stock deducted for order #" + orderId
+                + (deducted < requested ? " (requested " + requested + ", short by " + (requested - deducted) + ")" : ""));
+        stockHistoryRepository.save(history);
+        return deducted;
     }
     
     @Transactional
@@ -164,11 +281,23 @@ public class MenuService {
     }
     
     @Transactional
-    public void deleteMenuItem(Long id) {
-        if (!menuItemRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Menu item not found with id: " + id);
-        }
+    public void deleteMenuItem(Long id, User currentUser) {
+        MenuItem menuItem = getMenuItemById(id);
+        assertCanManage(menuItem, currentUser);
         menuItemRepository.deleteById(id);
+    }
+
+    private void assertCanManage(MenuItem menuItem, User currentUser) {
+        if (currentUser == null || currentUser.getRole() == User.UserRole.admin) {
+            return;
+        }
+        if (currentUser.getRole() != User.UserRole.seller) {
+            throw new BadRequestException("Only sellers can change products");
+        }
+        Seller seller = sellerNetworkService.findSellerForUser(currentUser);
+        if (seller == null || menuItem.getSellerId() == null || !seller.getId().equals(menuItem.getSellerId())) {
+            throw new BadRequestException("You can update only your own products");
+        }
     }
     
     // Product Image Management

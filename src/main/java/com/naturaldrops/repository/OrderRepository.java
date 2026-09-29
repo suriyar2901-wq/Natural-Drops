@@ -6,7 +6,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -38,5 +40,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     
     @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items WHERE o.id = :id")
     java.util.Optional<Order> findByIdWithItems(@Param("id") Long id);
+
+    @Query("SELECT o FROM Order o WHERE o.scheduledDeliveryDate = :deliveryDate AND (o.deliveryReminderSent = false OR o.deliveryReminderSent IS NULL) AND o.status NOT IN :closed")
+    List<Order> findDueDeliveryReminders(@Param("deliveryDate") LocalDate deliveryDate,
+                                         @Param("closed") Collection<Order.OrderStatus> closed);
 }
 

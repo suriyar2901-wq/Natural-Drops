@@ -94,6 +94,15 @@ public class User {
     
     @Column(name = "device_token", columnDefinition = "TEXT")
     private String deviceToken;
+
+    @Column(name = "linked_seller_id")
+    private Long linkedSellerId;
+
+    @Column(name = "must_set_password")
+    private Boolean mustSetPassword = false;
+
+    @Transient
+    private String companyCode;
     
     @PrePersist
     protected void onCreate() {

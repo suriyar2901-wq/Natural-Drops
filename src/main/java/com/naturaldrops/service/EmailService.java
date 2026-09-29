@@ -97,6 +97,71 @@ public class EmailService {
         }
     }
     
+    public boolean sendBuyerInvite(String toEmail, String buyerName, String username, String companyName, String resetLink) {
+        if (toEmail == null || toEmail.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            if (fromEmail == null || fromEmail.contains("your-email") || fromEmail.contains("no-reply")) {
+                log.error("Email not configured. Please set spring.mail.username in application.properties");
+                return false;
+            }
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(toEmail.trim());
+            message.setSubject("Your " + (companyName != null ? companyName : "Natural Drops") + " buyer account");
+            String displayName = buyerName != null && buyerName.trim().length() > 0 ? buyerName : username;
+            message.setText(
+                    "Dear " + displayName + ",\n\n" +
+                    "A buyer account was created for you.\n\n" +
+                    "Company: " + (companyName != null ? companyName : "Natural Drops") + "\n" +
+                    "Username: " + username + "\n\n" +
+                    "Open this link and create your new password to log in:\n" +
+                    resetLink + "\n\n" +
+                    "This link is valid for 15 minutes.\n\n" +
+                    "Best regards,\n" +
+                    "Natural Drops"
+            );
+            mailSender.send(message);
+            log.info("Buyer invite email sent to: {}", toEmail);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to send buyer invite email to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean sendBuyerInviteCopy(String toEmail, String sellerName, String username, String buyerName, String companyName, String resetLink) {
+        if (toEmail == null || toEmail.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            if (fromEmail == null || fromEmail.contains("your-email") || fromEmail.contains("no-reply")) {
+                return false;
+            }
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(toEmail.trim());
+            message.setSubject("Buyer created: " + username);
+            message.setText(
+                    "Dear " + (sellerName != null ? sellerName : "Seller") + ",\n\n" +
+                    "You created a buyer account for " + buyerName + ".\n\n" +
+                    "Company: " + (companyName != null ? companyName : "Natural Drops") + "\n" +
+                    "Username: " + username + "\n\n" +
+                    "Share this password-setup link with the buyer:\n" +
+                    resetLink + "\n\n" +
+                    "The buyer must create a new password using this link before they can log in.\n\n" +
+                    "Best regards,\n" +
+                    "Natural Drops"
+            );
+            mailSender.send(message);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to send seller buyer-invite copy to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
     public boolean sendPasswordResetOtp(String toEmail, String otp) {
         try {
             // Validate email configuration

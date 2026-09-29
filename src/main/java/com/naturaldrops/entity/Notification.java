@@ -30,6 +30,9 @@ public class Notification {
     
     @Column(name = "item_count", nullable = false)
     private Integer itemCount;
+
+    @Column(columnDefinition = "TEXT")
+    private String message;
     
     @Column(name = "is_read", nullable = false)
     private Boolean isRead = false;

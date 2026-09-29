@@ -6,9 +6,16 @@ import com.naturaldrops.entity.MenuItem;
 import com.naturaldrops.entity.Order;
 import com.naturaldrops.entity.OrderItem;
 import com.naturaldrops.entity.OrderStatusHistory;
+import com.naturaldrops.entity.CanEvent;
+import com.naturaldrops.entity.ShopCustomer;
+import com.naturaldrops.entity.User;
+import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
+import com.naturaldrops.repository.CanEventRepository;
 import com.naturaldrops.repository.OrderRepository;
 import com.naturaldrops.repository.OrderStatusHistoryRepository;
+import com.naturaldrops.repository.ShopCustomerRepository;
+import com.naturaldrops.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +25,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -29,6 +37,10 @@ public class OrderService {
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
     private final NotificationService notificationService;
     private final MenuService menuService;
+    private final SellerNetworkService sellerNetworkService;
+    private final ShopCustomerRepository shopCustomerRepository;
+    private final CanEventRepository canEventRepository;
+    private final UserRepository userRepository;
     
     public List<Order> getAllOrders() {
         return orderRepository.findAllByOrderByOrderDateDesc();
@@ -140,8 +152,12 @@ public class OrderService {
         }
         
         order.setTotal(request.getTotal());
+        if (request.getNote() != null && !request.getNote().trim().isEmpty()) {
+            order.setBillingNotes(request.getNote().trim());
+        }
         order.setStatus(Order.OrderStatus.pending);
         order.setOrderDate(LocalDateTime.now());
+        applyBuyerDeliverySlot(order, request);
         
         // Add order items
         for (CreateOrderRequest.OrderItemRequest itemRequest : request.getItems()) {
@@ -162,8 +178,92 @@ public class OrderService {
         
         // Create notification for admin
         notificationService.createAdminNotification(savedOrder);
+        if (request.getScheduledDeliveryDate() != null && !request.getScheduledDeliveryDate().trim().isEmpty()) {
+            issueTwentyLitreCans(savedOrder);
+        }
         
         return savedOrder;
+    }
+
+    private void applyBuyerDeliverySlot(Order order, CreateOrderRequest request) {
+        if (request.getScheduledDeliveryDate() == null || request.getScheduledDeliveryDate().trim().isEmpty()) {
+            return;
+        }
+        LocalDate today = LocalDate.now();
+        LocalDate deliveryDate;
+        try {
+            deliveryDate = LocalDate.parse(request.getScheduledDeliveryDate().trim());
+        } catch (DateTimeParseException ex) {
+            throw new BadRequestException("Choose a valid delivery date");
+        }
+        if (deliveryDate.isBefore(today)) {
+            throw new BadRequestException("Delivery date cannot be in the past");
+        }
+        LocalTime deliveryTime = LocalTime.of(9, 0);
+        if (request.getDeliveryTime() != null && !request.getDeliveryTime().trim().isEmpty()) {
+            try {
+                deliveryTime = LocalTime.parse(request.getDeliveryTime().trim());
+            } catch (DateTimeParseException ex) {
+                throw new BadRequestException("Choose a valid delivery time");
+            }
+        }
+        if (deliveryDate.equals(today) && !deliveryTime.isAfter(LocalTime.now())) {
+            throw new BadRequestException("Choose a future delivery time");
+        }
+        order.setScheduledDeliveryDate(deliveryDate);
+        order.setEstimatedDelivery(deliveryDate.atTime(deliveryTime));
+        order.setDeliveryReminderSent(Boolean.FALSE);
+        order.setSellerUserId(sellerNetworkService.sellerUserIdForBuyer(request.getBuyerId()));
+    }
+
+    private void issueTwentyLitreCans(Order order) {
+        int cans = 0;
+        for (OrderItem item : order.getItems()) {
+            if (item.getItemName() != null && item.getItemName().toLowerCase().contains("20")) {
+                cans += item.getQuantity() != null ? item.getQuantity() : 0;
+            }
+        }
+        if (cans <= 0 || order.getBuyerId() == null) {
+            return;
+        }
+        ShopCustomer customer = shopCustomerRepository.findByBuyerUserId(order.getBuyerId()).orElse(null);
+        if (customer == null && order.getBuyerPhone() != null && order.getBuyerPhone().trim().length() == 10) {
+            String phone = order.getBuyerPhone().trim();
+            Long sellerUserId = order.getSellerUserId();
+            for (ShopCustomer match : shopCustomerRepository.findByMobile(phone)) {
+                if (sellerUserId == null || sellerUserId.equals(match.getSellerUserId())) {
+                    customer = match;
+                    break;
+                }
+            }
+        }
+        if (customer == null) {
+            return;
+        }
+        if (customer.getBuyerUserId() == null) {
+            User buyer = userRepository.findById(order.getBuyerId()).orElse(null);
+            if (buyer != null && buyer.getRole() == User.UserRole.buyer) {
+                customer.setBuyerUserId(buyer.getId());
+            }
+        }
+        customer.setEmptyCans((customer.getEmptyCans() == null ? 0 : customer.getEmptyCans()) + cans);
+        shopCustomerRepository.save(customer);
+        CanEvent event = new CanEvent();
+        event.setCustomerId(customer.getId());
+        event.setChangeAmount(cans);
+        event.setCopy("Issued " + cans + " can(s) with order #" + order.getId());
+        event.setOccurredAt(LocalDateTime.now());
+        canEventRepository.save(event);
+    }
+
+    @Transactional
+    public Order schedulePhoneDelivery(Long orderId, LocalDate deliveryDate, Long sellerUserId) {
+        Order order = getOrderById(orderId);
+        order.setScheduledDeliveryDate(deliveryDate);
+        order.setDeliveryReminderSent(Boolean.FALSE);
+        order.setSellerUserId(sellerUserId);
+        order.setEstimatedDelivery(deliveryDate.atTime(9, 0));
+        return orderRepository.save(order);
     }
 
     /**
@@ -266,10 +366,29 @@ public class OrderService {
             throw new IllegalStateException("Only pending orders can be confirmed");
         }
         
-        // Check and deduct stock for all items
+        boolean phoneOrder = order.getSellerUserId() != null
+                || (order.getDeliveryAddress() != null && order.getDeliveryAddress().contains("Phone Order"));
+        StringBuilder confirmNote = new StringBuilder(phoneOrder
+                ? "Phone order confirmed"
+                : "Order confirmed, stock deducted");
+
         for (OrderItem item : order.getItems()) {
-            if (item.getMenuItemId() != null) {
-                menuService.deductStock(item.getMenuItemId(), item.getCartQuantity(), order.getId(), confirmedBy);
+            if (item.getMenuItemId() == null) {
+                continue;
+            }
+            int qty = item.getCartQuantity() != null ? item.getCartQuantity()
+                    : (item.getQuantity() != null ? item.getQuantity() : 0);
+            if (qty <= 0) {
+                continue;
+            }
+            if (phoneOrder) {
+                int deducted = menuService.deductAvailableStock(item.getMenuItemId(), qty, order.getId(), confirmedBy);
+                if (deducted < qty) {
+                    confirmNote.append(". Stock short for ").append(item.getItemName())
+                            .append(" (needed ").append(qty).append(", deducted ").append(deducted).append(")");
+                }
+            } else {
+                menuService.deductStock(item.getMenuItemId(), qty, order.getId(), confirmedBy);
             }
         }
         
@@ -279,7 +398,7 @@ public class OrderService {
         order.setStatusUpdatedAt(LocalDateTime.now());
         
         Order updatedOrder = orderRepository.save(order);
-        recordStatusChange(id, oldStatus, Order.OrderStatus.confirmed, confirmedBy, "Order confirmed, stock deducted");
+        recordStatusChange(id, oldStatus, Order.OrderStatus.confirmed, confirmedBy, confirmNote.toString());
         
         // Create buyer notification for confirmed order (don't fail if notification fails)
         try {
@@ -465,12 +584,25 @@ public class OrderService {
     @Transactional
     public Order updateOrderBill(Long id, com.naturaldrops.dto.request.UpdateOrderBillRequest request) {
         Order order = getOrderById(id);
-        
-        // Only allow updating bill for orders in "processing" (On The Way) status
-        if (order.getStatus() != Order.OrderStatus.processing) {
+
+        if (order.getStatus() == Order.OrderStatus.canceled) {
+            throw new IllegalStateException("Canceled orders cannot be edited");
+        }
+        if (order.getPaymentStatus() == Order.PaymentStatus.PAID) {
+            throw new IllegalStateException("Paid bills cannot be edited");
+        }
+
+        Order.PaymentStatus previousPaymentStatus = order.getPaymentStatus();
+        java.math.BigDecimal previousBillAmount = order.getFinalBillAmount();
+
+        boolean openPayment = previousPaymentStatus == Order.PaymentStatus.PARTIALLY_PAID
+                || previousPaymentStatus == Order.PaymentStatus.UNPAID;
+        boolean firstBillOnTheWay = previousPaymentStatus == null
+                && order.getStatus() == Order.OrderStatus.processing;
+        if (!openPayment && !firstBillOnTheWay) {
             throw new IllegalStateException(
-                String.format("Bill can only be updated for orders in 'processing' (On The Way) status. Current status: %s", 
-                    order.getStatus())
+                String.format("Bill can only be updated for unpaid or partially paid orders. Current status: %s, payment: %s",
+                    order.getStatus(), previousPaymentStatus)
             );
         }
         
@@ -513,9 +645,13 @@ public class OrderService {
         recordStatusChange(id, order.getStatus(), order.getStatus(), 
             request.getBilledBy() != null ? request.getBilledBy() : "seller", notes);
         
-        // Create buyer notification about bill update
+        // Editing a partially paid bill notifies the buyer. A fully paid bill is locked above.
         try {
-            notificationService.createBuyerNotification(updatedOrder);
+            if (previousPaymentStatus == Order.PaymentStatus.PARTIALLY_PAID) {
+                notificationService.createBuyerBillUpdatedNotification(updatedOrder, previousBillAmount);
+            } else if (order.getStatus() == Order.OrderStatus.processing) {
+                notificationService.createBuyerNotification(updatedOrder);
+            }
         } catch (Exception e) {
             System.err.println("Failed to create buyer notification: " + e.getMessage());
             e.printStackTrace();

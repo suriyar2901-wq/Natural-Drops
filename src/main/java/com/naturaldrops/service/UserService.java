@@ -155,6 +155,30 @@ public class UserService {
         
         return userRepository.save(user);
     }
+
+    @Transactional
+    public User updateOwnProfile(Long id, User userDetails) {
+        User safe = new User();
+        if (userDetails != null) {
+            safe.setUsername(userDetails.getUsername());
+            safe.setFullName(userDetails.getFullName());
+            safe.setEmail(userDetails.getEmail());
+            safe.setPhone(userDetails.getPhone());
+            safe.setGender(userDetails.getGender());
+            safe.setDateOfBirth(userDetails.getDateOfBirth());
+            safe.setAlternatePhone(userDetails.getAlternatePhone());
+            safe.setProfilePhoto(userDetails.getProfilePhoto());
+            safe.setHouseDoorNo(userDetails.getHouseDoorNo());
+            safe.setStreetArea(userDetails.getStreetArea());
+            safe.setCity(userDetails.getCity());
+            safe.setDistrict(userDetails.getDistrict());
+            safe.setState(userDetails.getState());
+            safe.setPincode(userDetails.getPincode());
+            safe.setLandmark(userDetails.getLandmark());
+            safe.setAddress(userDetails.getAddress());
+        }
+        return updateUser(id, safe);
+    }
     
     @Transactional
     public void deleteUser(Long id) {

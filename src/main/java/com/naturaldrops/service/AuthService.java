@@ -12,6 +12,7 @@ import com.naturaldrops.entity.PasswordResetToken;
 import com.naturaldrops.entity.RefreshToken;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.AccountStatusException;
+import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.UnauthorizedException;
 import com.naturaldrops.repository.PasswordResetTokenRepository;
 import com.naturaldrops.repository.RefreshTokenRepository;
@@ -20,12 +21,15 @@ import com.naturaldrops.util.JwtTokenProvider;
 import com.naturaldrops.util.PasswordValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,8 +43,12 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final EmailService emailService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final SellerNetworkService sellerNetworkService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private static final SecureRandom random = new SecureRandom();
+
+    @Value("${app.base-url:http://localhost:8081}")
+    private String frontendBaseUrl;
     
     @Transactional
     public User register(RegisterRequest request) {
@@ -102,28 +110,35 @@ public class AuthService {
         user.setCreatedAt(LocalDateTime.now());
         user.setCreatedBy(request.getUsername());
         
-        // Set user status based on role
-        // Buyers require admin approval (PENDING), Admin/Seller are auto-approved
+        // New buyer and seller accounts are active immediately.
+        // A seller cannot turn their own account off. Only an admin can deactivate it.
+        user.setStatus(User.UserStatus.APPROVED);
+        user.setIsActive(true);
+
         if (request.getRole() == User.UserRole.buyer) {
-            user.setStatus(User.UserStatus.PENDING);
-        } else {
-            // Admin and Seller accounts are auto-approved
-            user.setStatus(User.UserStatus.APPROVED);
+            if (request.getCompanyCode() == null || request.getCompanyCode().trim().isEmpty()) {
+                throw new BadRequestException("Company code is required to create a buyer account");
+            }
+            user.setLinkedSellerId(sellerNetworkService.findByAnyCode(request.getCompanyCode()).getId());
+        } else if (request.getRole() == User.UserRole.seller) {
+            if (request.getCompanyName() == null || request.getCompanyName().trim().length() < 2) {
+                throw new BadRequestException("Company name is required to create a seller account");
+            }
         }
         
-        // All new users start as INACTIVE - admin must activate them
-        user.setIsActive(false);
-        log.info("🔍 [AuthService] Setting new user as INACTIVE (isActive = false)");
-        log.info("   Admin must activate account before user can access application");
-        
         User savedUser = userRepository.save(user);
+        if (savedUser.getRole() == User.UserRole.seller) {
+            savedUser.setCompanyCode(sellerNetworkService.createSellerAccount(savedUser, request.getCompanyName()).getCompanyCode());
+        } else if (savedUser.getRole() == User.UserRole.buyer) {
+            sellerNetworkService.linkBuyerToCompany(savedUser, request.getCompanyCode());
+        }
         log.info("═══════════════════════════════════════════════════════");
         log.info("✅ [AuthService] ===== REGISTRATION SUCCESSFUL ======");
         log.info("   User ID: {}", savedUser.getId());
         log.info("   Username: {}", savedUser.getUsername());
         log.info("   Role: {}", savedUser.getRole());
-        log.info("   Status: {} (Buyer=PENDING, Admin/Seller=APPROVED)", savedUser.getStatus());
-        log.info("   isActive: {} (All new users start as INACTIVE)", savedUser.getIsActive());
+        log.info("   Status: {}", savedUser.getStatus());
+        log.info("   isActive: {} (new accounts start active; admin can deactivate later)", savedUser.getIsActive());
         log.info("   Timestamp: {}", LocalDateTime.now());
         log.info("═══════════════════════════════════════════════════════");
         
@@ -156,6 +171,9 @@ public class AuthService {
             log.warn("❌ [AuthService] Login failed - Invalid password for user: {}", request.getUsername());
             throw new UnauthorizedException("Invalid username or password");
         }
+        if (Boolean.TRUE.equals(user.getMustSetPassword())) {
+            throw new UnauthorizedException("Please set your password using the invite link sent to you.");
+        }
         
         log.info("✅ [AuthService] Password verification passed");
         
@@ -166,7 +184,7 @@ public class AuthService {
         log.info("   User role: {}", user.getRole());
         log.info("   Is Admin: {}", user.getRole() == User.UserRole.admin);
         
-        if (user.getRole() != User.UserRole.admin) {
+        if (user.getRole() == User.UserRole.seller) {
             log.info("🔍 [AuthService] Non-admin user - checking isActive status...");
             // For Seller and Buyer: check isActive status first
             if (user.getIsActive() == null) {
@@ -460,6 +478,7 @@ public class AuthService {
                 .orElseThrow(() -> new UnauthorizedException("User not found"));
         
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustSetPassword(false);
         userRepository.save(user);
         
         // Mark token as used
@@ -470,6 +489,29 @@ public class AuthService {
         passwordResetTokenRepository.deleteExpiredTokens(LocalDateTime.now());
     }
     
+    public String encodePassword(String rawPassword) {
+        return passwordEncoder.encode(rawPassword);
+    }
+
+    @Transactional
+    public Map<String, String> createInvite(User user) {
+        passwordResetTokenRepository.deleteExpiredTokens(LocalDateTime.now());
+        String token = UUID.randomUUID().toString();
+        String otp = generateOtp();
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUserId(user.getId());
+        resetToken.setToken(token);
+        resetToken.setOtp(otp);
+        resetToken.setExpiryTime(LocalDateTime.now().plusMinutes(15));
+        resetToken.setUsed(false);
+        passwordResetTokenRepository.save(resetToken);
+        Map<String, String> result = new HashMap<String, String>();
+        result.put("token", token);
+        result.put("otp", otp);
+        result.put("resetLink", frontendBaseUrl + "/ResetPassword?token=" + token);
+        return result;
+    }
+
     private String generateOtp() {
         // Generate 6-digit OTP
         int otp = 100000 + random.nextInt(900000);

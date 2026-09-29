@@ -95,6 +95,13 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success("User created successfully", createdUser));
     }
     
+    @PutMapping("/me")
+    public ResponseEntity<ApiResponse<User>> updateOwnProfile(@RequestBody User user, HttpServletRequest request) {
+        User currentUser = getCurrentUser(request);
+        User updatedUser = userService.updateOwnProfile(currentUser.getId(), user);
+        return ResponseEntity.ok(ApiResponse.success("Profile updated successfully", updatedUser));
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<User>> updateUser(@PathVariable Long id, @RequestBody User user, HttpServletRequest request) {
         requireAdmin(request);

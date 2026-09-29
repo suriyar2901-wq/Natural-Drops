@@ -67,5 +67,8 @@ public class RegisterRequest {
     
     // Keep old address field for backward compatibility
     private String address;
+
+    private String companyName;
+    private String companyCode;
 }
 

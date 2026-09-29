@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -63,6 +64,15 @@ public class Order {
     
     @Column(name = "estimated_delivery")
     private LocalDateTime estimatedDelivery;
+
+    @Column(name = "scheduled_delivery_date")
+    private LocalDate scheduledDeliveryDate;
+
+    @Column(name = "delivery_reminder_sent")
+    private Boolean deliveryReminderSent = false;
+
+    @Column(name = "seller_user_id")
+    private Long sellerUserId;
     
     @Column(name = "confirmed_by", length = 50)
     private String confirmedBy;

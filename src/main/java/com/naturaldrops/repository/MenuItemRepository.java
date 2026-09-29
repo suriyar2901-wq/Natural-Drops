@@ -38,5 +38,15 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, Long> {
     @EntityGraph(attributePaths = {"images", "videos"})
     @Query("SELECT DISTINCT m FROM MenuItem m WHERE m.id = :id")
     Optional<MenuItem> findByIdWithMedia(@Param("id") Long id);
+
+    @EntityGraph(attributePaths = {"images", "videos"})
+    @Query("SELECT DISTINCT m FROM MenuItem m WHERE m.sellerId = :sellerId")
+    List<MenuItem> findBySellerIdWithMedia(@Param("sellerId") Long sellerId);
+
+    @EntityGraph(attributePaths = {"images", "videos"})
+    @Query("SELECT DISTINCT m FROM MenuItem m WHERE m.sellerId IS NULL")
+    List<MenuItem> findUnassignedWithMedia();
+
+    long countBySellerId(Long sellerId);
 }
 

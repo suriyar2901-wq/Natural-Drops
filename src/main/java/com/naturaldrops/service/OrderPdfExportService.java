@@ -70,6 +70,13 @@ public class OrderPdfExportService {
             y -= 8;
             y = writeText(cs, PDType1Font.HELVETICA_BOLD, 11, x, y, "Delivery");
             y = writeText(cs, PDType1Font.HELVETICA, 10, x, y, "Address: " + safe(order.getDeliveryAddress()));
+            if (order.getScheduledDeliveryDate() != null) {
+                String when = order.getScheduledDeliveryDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+                if (order.getEstimatedDelivery() != null) {
+                    when += " at " + order.getEstimatedDelivery().format(DateTimeFormatter.ofPattern("hh:mm a"));
+                }
+                y = writeText(cs, PDType1Font.HELVETICA, 10, x, y, "Scheduled: " + when);
+            }
             String coords = "";
             if (order.getLatitude() != null && order.getLongitude() != null) {
                 coords = order.getLatitude() + ", " + order.getLongitude();

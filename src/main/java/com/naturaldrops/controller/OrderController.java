@@ -6,8 +6,11 @@ import com.naturaldrops.dto.request.UpdateOrderBillRequest;
 import com.naturaldrops.dto.response.ApiResponse;
 import com.naturaldrops.entity.Order;
 import com.naturaldrops.entity.OrderStatusHistory;
+import com.naturaldrops.entity.User;
 import com.naturaldrops.service.OrderService;
 import com.naturaldrops.service.OrderPdfExportService;
+import com.naturaldrops.service.SellerNetworkService;
+import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -27,14 +30,19 @@ public class OrderController {
     
     private final OrderService orderService;
     private final OrderPdfExportService orderPdfExportService;
+    private final SellerNetworkService sellerNetworkService;
     
     @GetMapping
     public ResponseEntity<ApiResponse<List<Order>>> getAllOrders(
             @RequestParam(required = false) String fromDate,
             @RequestParam(required = false) String toDate,
-            @RequestParam(required = false) String status
+            @RequestParam(required = false) String status,
+            HttpServletRequest request
     ) {
-        List<Order> orders = orderService.getOrdersFiltered(status, fromDate, toDate);
+        List<Order> orders = sellerNetworkService.scopeOrders(
+                orderService.getOrdersFiltered(status, fromDate, toDate),
+                currentUser(request)
+        );
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
     
@@ -64,9 +72,13 @@ public class OrderController {
             @RequestParam(required = false) String fromDate,
             @RequestParam(required = false) String toDate,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String sellerName
+            @RequestParam(required = false) String sellerName,
+            HttpServletRequest request
     ) {
-        List<Order> orders = orderService.getOrdersFiltered(status, fromDate, toDate);
+        List<Order> orders = sellerNetworkService.scopeOrders(
+                orderService.getOrdersFiltered(status, fromDate, toDate),
+                currentUser(request)
+        );
         byte[] pdf = orderPdfExportService.generateMultiOrderPdf(orders, sellerName != null ? sellerName : "Seller");
         String date = java.time.LocalDate.now().toString();
         String filename = "orders_" + date + ".pdf";
@@ -91,8 +103,10 @@ public class OrderController {
     }
     
     @GetMapping("/status/{status}")
-    public ResponseEntity<ApiResponse<List<Order>>> getOrdersByStatus(@PathVariable Order.OrderStatus status) {
-        List<Order> orders = orderService.getOrdersByStatus(status);
+    public ResponseEntity<ApiResponse<List<Order>>> getOrdersByStatus(
+            @PathVariable Order.OrderStatus status,
+            HttpServletRequest request) {
+        List<Order> orders = sellerNetworkService.scopeOrders(orderService.getOrdersByStatus(status), currentUser(request));
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
     
@@ -103,7 +117,9 @@ public class OrderController {
     }
     
     @GetMapping("/filter")
-    public ResponseEntity<ApiResponse<List<Order>>> getOrdersByPeriod(@RequestParam String period) {
+    public ResponseEntity<ApiResponse<List<Order>>> getOrdersByPeriod(
+            @RequestParam String period,
+            HttpServletRequest request) {
         List<Order> orders;
         switch (period.toLowerCase()) {
             case "today":
@@ -118,7 +134,7 @@ public class OrderController {
             default:
                 orders = orderService.getAllOrders();
         }
-        return ResponseEntity.ok(ApiResponse.success(orders));
+        return ResponseEntity.ok(ApiResponse.success(sellerNetworkService.scopeOrders(orders, currentUser(request))));
     }
     
     @PostMapping
@@ -229,8 +245,9 @@ public class OrderController {
     }
     
     /**
-     * Update order bill and payment status (Seller only)
-     * Can only be updated for orders in "processing" (On The Way) status
+     * Update order bill and payment status (Seller only).
+     * Unpaid and partially paid bills can be edited. A fully paid bill is locked.
+     * Editing a partially paid bill sends a message to the buyer.
      */
     @PutMapping("/{id}/bill")
     public ResponseEntity<ApiResponse<Order>> updateOrderBill(
@@ -245,6 +262,10 @@ public class OrderController {
         
         Order order = orderService.updateOrderBill(id, request);
         return ResponseEntity.ok(ApiResponse.success("Order bill updated successfully", order));
+    }
+
+    private User currentUser(HttpServletRequest request) {
+        return (User) request.getAttribute("currentUser");
     }
 }
 

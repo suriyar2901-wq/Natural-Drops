@@ -3,7 +3,9 @@ package com.naturaldrops.controller;
 import com.naturaldrops.dto.response.ApiResponse;
 import com.naturaldrops.entity.BuyerNotification;
 import com.naturaldrops.entity.Notification;
+import com.naturaldrops.entity.User;
 import com.naturaldrops.service.NotificationService;
+import javax.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,20 +22,20 @@ public class NotificationController {
     
     // Admin Notifications
     @GetMapping("/admin")
-    public ResponseEntity<ApiResponse<List<Notification>>> getAllAdminNotifications() {
-        List<Notification> notifications = notificationService.getAllAdminNotifications();
+    public ResponseEntity<ApiResponse<List<Notification>>> getAllAdminNotifications(HttpServletRequest request) {
+        List<Notification> notifications = notificationService.getAllAdminNotifications(currentUser(request));
         return ResponseEntity.ok(ApiResponse.success(notifications));
     }
     
     @GetMapping("/admin/unread")
-    public ResponseEntity<ApiResponse<List<Notification>>> getUnreadAdminNotifications() {
-        List<Notification> notifications = notificationService.getUnreadAdminNotifications();
+    public ResponseEntity<ApiResponse<List<Notification>>> getUnreadAdminNotifications(HttpServletRequest request) {
+        List<Notification> notifications = notificationService.getUnreadAdminNotifications(currentUser(request));
         return ResponseEntity.ok(ApiResponse.success(notifications));
     }
     
     @GetMapping("/admin/count")
-    public ResponseEntity<ApiResponse<Long>> getUnreadAdminCount() {
-        Long count = notificationService.getUnreadAdminNotificationCount();
+    public ResponseEntity<ApiResponse<Long>> getUnreadAdminCount(HttpServletRequest request) {
+        Long count = notificationService.getUnreadAdminNotificationCount(currentUser(request));
         return ResponseEntity.ok(ApiResponse.success(count));
     }
     
@@ -72,6 +74,10 @@ public class NotificationController {
     public ResponseEntity<ApiResponse<Object>> markBuyerNotificationAsRead(@PathVariable Long id) {
         notificationService.markBuyerNotificationAsRead(id);
         return ResponseEntity.ok(ApiResponse.success("Notification marked as read", null));
+    }
+
+    private User currentUser(HttpServletRequest request) {
+        return (User) request.getAttribute("currentUser");
     }
 }
 
