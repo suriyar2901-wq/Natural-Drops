@@ -184,7 +184,7 @@ public class AuthService {
         log.info("   User role: {}", user.getRole());
         log.info("   Is Admin: {}", user.getRole() == User.UserRole.admin);
         
-        if (user.getRole() == User.UserRole.seller) {
+        if (user.getRole() == User.UserRole.seller || user.getRole() == User.UserRole.buyer) {
             log.info("🔍 [AuthService] Non-admin user - checking isActive status...");
             // For Seller and Buyer: check isActive status first
             if (user.getIsActive() == null) {
@@ -328,6 +328,13 @@ public class AuthService {
         // Get user
         User user = userRepository.findById(refreshToken.getUserId())
                 .orElseThrow(() -> new UnauthorizedException("User not found"));
+        if ((user.getRole() == User.UserRole.seller || user.getRole() == User.UserRole.buyer)
+                && Boolean.FALSE.equals(user.getIsActive())) {
+            throw new AccountStatusException(
+                    "Your account is deactivated. Please contact customer care.",
+                    "INACTIVE"
+            );
+        }
         
         // Generate new access token
         String newAccessToken = jwtTokenProvider.generateAccessToken(user);
