@@ -3,6 +3,14 @@
 ## Overview
 RESTful API backend for Natural Drops Water Supply Management System built with Spring Boot 3.x and MySQL.
 
+## Latest changes
+- Seller shop support: customers, phone orders, 20L can ledger, and daily regular-buyer orders.
+- Orders store a future delivery date and time. A reminder goes out the day before.
+- New seller accounts are active immediately. Only an admin can deactivate a seller or a buyer.
+- Deactivated buyers are rejected on login, token refresh, and later API calls, the same as sellers.
+- Partial bills keep the collected amount and the remaining balance. The seller dashboard splits earnings into fully paid, partial collected, and yet to collect.
+- Admin product lists include the seller shop name.
+
 ## Technologies
 - Java 8 (JDK 1.8)
 - Spring Boot 2.7.18
