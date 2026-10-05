@@ -103,6 +103,9 @@ public class User {
 
     @Transient
     private String companyCode;
+
+    @Transient
+    private String shopName;
     
     @PrePersist
     protected void onCreate() {

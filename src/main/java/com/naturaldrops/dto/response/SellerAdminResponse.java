@@ -23,6 +23,7 @@ public class SellerAdminResponse {
     private String city;
     private String pincode;
     private String accountStatus;
+    private Boolean loginActive;
     private String deactivationReason;
     private String adminNote;
     private LocalDateTime createdAt;

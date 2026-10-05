@@ -30,9 +30,11 @@ public class PlatformAdminController {
     @GetMapping("/dashboard")
     public ResponseEntity<ApiResponse<PlatformDashboardResponse>> dashboard(
             @RequestParam(required = false) String period,
+            @RequestParam(required = false) String fromDate,
+            @RequestParam(required = false) String toDate,
             HttpServletRequest request) {
         requireStaff(request);
-        return ResponseEntity.ok(ApiResponse.success(sellerAdminService.getDashboard(period)));
+        return ResponseEntity.ok(ApiResponse.success(sellerAdminService.getDashboard(period, fromDate, toDate)));
     }
 
     @GetMapping("/sellers")

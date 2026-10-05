@@ -43,12 +43,14 @@ public class OrderController {
                 orderService.getOrdersFiltered(status, fromDate, toDate),
                 currentUser(request)
         );
+        sellerNetworkService.attachOrderSellerNames(orders);
         return ResponseEntity.ok(ApiResponse.success(orders));
     }
     
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<Order>> getOrderById(@PathVariable Long id) {
         Order order = orderService.getOrderById(id);
+        sellerNetworkService.attachOrderSellerNames(java.util.Collections.singletonList(order));
         return ResponseEntity.ok(ApiResponse.success(order));
     }
 

@@ -16,7 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -177,6 +179,65 @@ public class SellerNetworkService {
             }
         }
         return scoped;
+    }
+
+    public void attachOrderSellerNames(List<Order> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return;
+        }
+        Map<Long, String> namesByUserId = sellerNamesByUserId();
+        for (Order order : orders) {
+            if (order.getSellerUserId() == null) {
+                continue;
+            }
+            order.setSellerBusinessName(namesByUserId.get(order.getSellerUserId()));
+        }
+    }
+
+    public void attachShopNames(List<User> users) {
+        if (users == null || users.isEmpty()) {
+            return;
+        }
+        Map<Long, String> namesBySellerId = new HashMap<Long, String>();
+        Map<Long, String> namesByUserId = sellerNamesByUserId();
+        for (Seller seller : sellerRepository.findAll()) {
+            namesBySellerId.put(seller.getId(), sellerDisplayName(seller));
+        }
+        for (User user : users) {
+            if (user.getRole() == User.UserRole.seller) {
+                user.setShopName(namesByUserId.get(user.getId()));
+            } else if (user.getRole() == User.UserRole.buyer) {
+                String shopName = user.getLinkedSellerId() != null
+                        ? namesBySellerId.get(user.getLinkedSellerId()) : null;
+                if (shopName == null) {
+                    Long sellerUserId = sellerUserIdForBuyer(user.getId());
+                    if (sellerUserId != null) {
+                        shopName = namesByUserId.get(sellerUserId);
+                    }
+                }
+                user.setShopName(shopName);
+            }
+        }
+    }
+
+    private Map<Long, String> sellerNamesByUserId() {
+        Map<Long, String> names = new HashMap<Long, String>();
+        for (Seller seller : sellerRepository.findAll()) {
+            if (seller.getUserId() != null) {
+                names.put(seller.getUserId(), sellerDisplayName(seller));
+            }
+        }
+        return names;
+    }
+
+    private String sellerDisplayName(Seller seller) {
+        if (seller.getBusinessName() != null && !seller.getBusinessName().trim().isEmpty()) {
+            return seller.getBusinessName().trim();
+        }
+        if (seller.getOwnerName() != null && !seller.getOwnerName().trim().isEmpty()) {
+            return seller.getOwnerName().trim();
+        }
+        return seller.getSellerCode();
     }
 
     public List<SellerInboxMessage> listInbox(Long sellerId) {

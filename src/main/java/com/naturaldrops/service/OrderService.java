@@ -257,12 +257,16 @@ public class OrderService {
     }
 
     @Transactional
-    public Order schedulePhoneDelivery(Long orderId, LocalDate deliveryDate, Long sellerUserId) {
+    public Order schedulePhoneDelivery(Long orderId, LocalDate deliveryDate, LocalTime deliveryTime, Long sellerUserId) {
         Order order = getOrderById(orderId);
+        LocalTime time = deliveryTime == null ? LocalTime.of(9, 0) : deliveryTime.withSecond(0).withNano(0);
+        if (deliveryDate.equals(LocalDate.now()) && !time.isAfter(LocalTime.now())) {
+            throw new BadRequestException("Choose a future delivery time");
+        }
         order.setScheduledDeliveryDate(deliveryDate);
         order.setDeliveryReminderSent(Boolean.FALSE);
         order.setSellerUserId(sellerUserId);
-        order.setEstimatedDelivery(deliveryDate.atTime(9, 0));
+        order.setEstimatedDelivery(deliveryDate.atTime(time));
         return orderRepository.save(order);
     }
 
@@ -481,10 +485,9 @@ public class OrderService {
             return order;
         }
         
-        // Only processing (On The Way) orders can be marked as delivered
-        if (order.getStatus() != Order.OrderStatus.processing) {
+        if (order.getStatus() != Order.OrderStatus.confirmed && order.getStatus() != Order.OrderStatus.processing) {
             throw new IllegalStateException(
-                String.format("Only orders in 'processing' (On The Way) status can be marked as delivered. Current status: %s", 
+                String.format("Only confirmed orders can be marked as delivered. Current status: %s",
                     order.getStatus())
             );
         }
@@ -597,9 +600,10 @@ public class OrderService {
 
         boolean openPayment = previousPaymentStatus == Order.PaymentStatus.PARTIALLY_PAID
                 || previousPaymentStatus == Order.PaymentStatus.UNPAID;
-        boolean firstBillOnTheWay = previousPaymentStatus == null
-                && order.getStatus() == Order.OrderStatus.processing;
-        if (!openPayment && !firstBillOnTheWay) {
+        boolean firstBillBeforeDelivery = previousPaymentStatus == null
+                && (order.getStatus() == Order.OrderStatus.confirmed
+                    || order.getStatus() == Order.OrderStatus.processing);
+        if (!openPayment && !firstBillBeforeDelivery) {
             throw new IllegalStateException(
                 String.format("Bill can only be updated for unpaid or partially paid orders. Current status: %s, payment: %s",
                     order.getStatus(), previousPaymentStatus)

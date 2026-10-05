@@ -5,6 +5,7 @@ import com.naturaldrops.dto.response.ApiResponse;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.UnauthorizedException;
 import com.naturaldrops.service.AuthService;
+import com.naturaldrops.service.SellerNetworkService;
 import com.naturaldrops.service.UserService;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -22,6 +23,7 @@ public class UserController {
     
     private final UserService userService;
     private final AuthService authService;
+    private final SellerNetworkService sellerNetworkService;
     
     /**
      * Helper method to check if current user is ADMIN
@@ -62,6 +64,7 @@ public class UserController {
     public ResponseEntity<ApiResponse<List<User>>> getAllUsers(HttpServletRequest request) {
         requireAdmin(request);
         List<User> users = userService.getAllUsers();
+        sellerNetworkService.attachShopNames(users);
         return ResponseEntity.ok(ApiResponse.success(users));
     }
     

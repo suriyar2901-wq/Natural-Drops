@@ -155,7 +155,7 @@ public class DashboardService {
                 productsCount,
                 dateRangeLabel,
                 todayOrders,
-                buildMonthlyRevenue(currentUser)
+                buildMonthlyRevenue(currentUser, fromDate, toDate)
         );
     }
 
@@ -170,9 +170,17 @@ public class DashboardService {
         return menuItemRepository.count();
     }
 
-    private List<MonthlyRevenuePoint> buildMonthlyRevenue(User currentUser) {
+    private List<MonthlyRevenuePoint> buildMonthlyRevenue(User currentUser, LocalDate fromDate, LocalDate toDate) {
         LocalDate today = LocalDate.now();
         LocalDate startMonth = today.minusMonths(5).withDayOfMonth(1);
+        LocalDate endMonth = today.withDayOfMonth(1);
+        if (fromDate != null && toDate != null && !toDate.isBefore(fromDate)) {
+            startMonth = fromDate.withDayOfMonth(1);
+            endMonth = toDate.withDayOfMonth(1);
+            if (startMonth.plusMonths(11).isBefore(endMonth)) {
+                startMonth = endMonth.minusMonths(11);
+            }
+        }
         LocalDateTime rangeStart = startMonth.atStartOfDay();
 
         Map<String, BigDecimal> orderRevenue = new HashMap<String, BigDecimal>();
@@ -195,7 +203,7 @@ public class DashboardService {
 
         Map<String, BigDecimal> subscriptionRevenue = new HashMap<String, BigDecimal>();
         List<SellerPayment> payments = sellerPaymentRepository.findByPaidAtBetweenOrderByPaidAtDesc(
-                rangeStart, today.atTime(23, 59, 59));
+                rangeStart, endMonth.withDayOfMonth(endMonth.lengthOfMonth()).atTime(23, 59, 59));
         Long sellerId = null;
         if (currentUser != null && currentUser.getRole() == User.UserRole.seller) {
             Seller seller = sellerNetworkService.findSellerForUser(currentUser);
@@ -216,7 +224,7 @@ public class DashboardService {
 
         DateTimeFormatter labelFormat = DateTimeFormatter.ofPattern("MMM");
         List<MonthlyRevenuePoint> points = new ArrayList<MonthlyRevenuePoint>();
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; !startMonth.plusMonths(i).isAfter(endMonth); i++) {
             LocalDate month = startMonth.plusMonths(i);
             String key = monthKey(month);
             BigDecimal orders = orderRevenue.get(key);

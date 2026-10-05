@@ -110,6 +110,9 @@ public class Order {
     
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<OrderItem> items = new ArrayList<>();
+
+    @Transient
+    private String sellerBusinessName;
     
     @PrePersist
     protected void onCreate() {

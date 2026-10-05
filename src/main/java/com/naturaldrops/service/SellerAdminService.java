@@ -53,6 +53,7 @@ public class SellerAdminService {
     private final SellerSubscriptionRepository subscriptionRepository;
     private final SellerPaymentRepository paymentRepository;
     private final UserRepository userRepository;
+    private final SettingsService settingsService;
     private final OrderRepository orderRepository;
     private final SellerNetworkService sellerNetworkService;
 
@@ -156,6 +157,7 @@ public class SellerAdminService {
         seller.setAccountStatus(Seller.AccountStatus.DEACTIVATED);
         seller.setDeactivationReason(request.getReason().trim());
         seller.setAdminNote(emptyToNull(request.getAdminNote()));
+        setLoginActive(seller, false);
         sellerRepository.save(seller);
         return toSellerResponse(seller, true);
     }
@@ -168,6 +170,7 @@ public class SellerAdminService {
         if (adminNote != null && adminNote.trim().length() > 0) {
             seller.setAdminNote(adminNote.trim());
         }
+        setLoginActive(seller, true);
         sellerRepository.save(seller);
         return toSellerResponse(seller, true);
     }
@@ -308,9 +311,16 @@ public class SellerAdminService {
         return toPaymentResponse(payment, seller);
     }
 
-    @Transactional(readOnly = true)
     public PlatformDashboardResponse getDashboard(String period) {
+        return getDashboard(period, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public PlatformDashboardResponse getDashboard(String period, String fromText, String toText) {
         String safePeriod = period == null || period.trim().isEmpty() ? "this_month" : period.trim();
+        LocalDate rangeFrom = parseFilterDate(fromText);
+        LocalDate rangeTo = parseFilterDate(toText);
+        boolean ranged = rangeFrom != null && rangeTo != null && !rangeTo.isBefore(rangeFrom);
         LocalDate today = LocalDate.now();
         LocalDate monthStart = today.withDayOfMonth(1);
         LocalDate lastMonthStart = monthStart.minusMonths(1);
@@ -321,8 +331,7 @@ public class SellerAdminService {
         List<SellerPayment> allPayments = paymentRepository.findAll();
 
         PlatformDashboardResponse response = new PlatformDashboardResponse();
-        response.setPeriod(safePeriod);
-        response.setTotalSellers(sellers.size());
+        response.setPeriod(ranged ? rangeFrom + " to " + rangeTo : safePeriod);
 
         long activeSubs = 0;
         long expiring = 0;
@@ -330,15 +339,24 @@ public class SellerAdminService {
         long pending = 0;
         long deactivated = 0;
         long newSellers = 0;
+        long listedSellers = 0;
         for (Seller seller : sellers) {
-            if (seller.getAccountStatus() == Seller.AccountStatus.DEACTIVATED) {
-                deactivated++;
-            }
-            if (seller.getCreatedAt() != null && !seller.getCreatedAt().toLocalDate().isBefore(monthStart)) {
-                newSellers++;
+            LocalDate created = seller.getCreatedAt() == null ? null : seller.getCreatedAt().toLocalDate();
+            boolean sellerInRange = !ranged || (created != null && !created.isBefore(rangeFrom) && !created.isAfter(rangeTo));
+            if (sellerInRange) {
+                listedSellers++;
+                if (seller.getAccountStatus() == Seller.AccountStatus.DEACTIVATED) {
+                    deactivated++;
+                }
+                if (ranged || (created != null && !created.isBefore(monthStart))) {
+                    newSellers++;
+                }
             }
             SellerSubscription subscription = subscriptions.get(seller.getId());
-            String status = computeSubscriptionStatus(subscription);
+            if (ranged && !subscriptionOverlaps(subscription, rangeFrom, rangeTo)) {
+                continue;
+            }
+            String status = ranged ? subscriptionStatusAsOf(subscription, rangeTo) : computeSubscriptionStatus(subscription);
             if ("Active".equals(status)) {
                 activeSubs++;
             } else if ("Expiring Soon".equals(status)) {
@@ -350,6 +368,7 @@ public class SellerAdminService {
             }
         }
 
+        response.setTotalSellers(ranged ? listedSellers : sellers.size());
         response.setActiveSubscriptions(activeSubs);
         response.setActiveSubscribers(activeSubs);
         response.setExpiringSoon(expiring);
@@ -357,34 +376,49 @@ public class SellerAdminService {
         response.setPaymentPending(pending);
         response.setDeactivatedAccounts(deactivated);
         response.setNewSellers(newSellers);
-        response.setActiveRate(percent(activeSubs, sellers.size()));
+        response.setActiveRate(percent(activeSubs, ranged ? Math.max(listedSellers, 1) : sellers.size()));
 
         BigDecimal revenueMonth = BigDecimal.ZERO;
         BigDecimal revenueToday = BigDecimal.ZERO;
         BigDecimal revenueLast = BigDecimal.ZERO;
         BigDecimal yetToReceive = BigDecimal.ZERO;
         long renewed = 0;
+        long failedPayments = 0;
+        LocalDate payFrom = ranged ? rangeFrom : monthStart;
+        LocalDate payTo = ranged ? rangeTo : today;
         for (SellerPayment payment : allPayments) {
             if (payment.getStatus() == SellerSubscription.PaymentStatus.SUCCESSFUL && payment.getPaidAt() != null) {
                 LocalDate paidDate = payment.getPaidAt().toLocalDate();
-                if (!paidDate.isBefore(monthStart) && !paidDate.isAfter(today)) {
+                if (!paidDate.isBefore(payFrom) && !paidDate.isAfter(payTo)) {
                     revenueMonth = revenueMonth.add(payment.getAmount());
                     renewed++;
                 }
-                if (paidDate.equals(today)) {
+                if (!ranged && paidDate.equals(today)) {
                     revenueToday = revenueToday.add(payment.getAmount());
                 }
-                if (!paidDate.isBefore(lastMonthStart) && !paidDate.isAfter(lastMonthEnd)) {
+                if (!ranged && !paidDate.isBefore(lastMonthStart) && !paidDate.isAfter(lastMonthEnd)) {
                     revenueLast = revenueLast.add(payment.getAmount());
                 }
             }
+            if (payment.getStatus() == SellerSubscription.PaymentStatus.FAILED) {
+                LocalDate eventDate = payment.getPaidAt() != null
+                        ? payment.getPaidAt().toLocalDate()
+                        : (payment.getCreatedAt() == null ? null : payment.getCreatedAt().toLocalDate());
+                if (!ranged || (eventDate != null && !eventDate.isBefore(rangeFrom) && !eventDate.isAfter(rangeTo))) {
+                    failedPayments++;
+                }
+            }
             if (payment.getStatus() == SellerSubscription.PaymentStatus.PENDING) {
-                yetToReceive = yetToReceive.add(payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO);
+                LocalDate created = payment.getCreatedAt() == null ? null : payment.getCreatedAt().toLocalDate();
+                if (!ranged || (created != null && !created.isBefore(rangeFrom) && !created.isAfter(rangeTo))) {
+                    yetToReceive = yetToReceive.add(payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO);
+                }
             }
         }
         for (SellerSubscription subscription : subscriptions.values()) {
             if (subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.PENDING
-                    && subscription.getAmount() != null) {
+                    && subscription.getAmount() != null
+                    && (!ranged || subscriptionOverlaps(subscription, rangeFrom, rangeTo))) {
                 yetToReceive = yetToReceive.add(subscription.getAmount());
             }
         }
@@ -393,6 +427,7 @@ public class SellerAdminService {
         response.setRevenueToday(revenueToday);
         response.setRevenueLastMonth(revenueLast);
         response.setYetToReceive(yetToReceive);
+        response.setFailedPayments(failedPayments);
         response.setExpectedRevenue(revenueMonth.add(yetToReceive));
         response.setRenewed(renewed);
         response.setNotRenewed(expired);
@@ -408,7 +443,7 @@ public class SellerAdminService {
 
         List<String> attention = new ArrayList<String>();
         if (expiring > 0) {
-            attention.add(expiring + " subscription(s) expiring within 7 days");
+            attention.add(expiring + " subscription(s) expiring within " + reminderWindowDays() + " days");
         }
         if (pending > 0) {
             attention.add(pending + " seller(s) have payment pending");
@@ -421,10 +456,17 @@ public class SellerAdminService {
         List<SellerPaymentResponse> recent = new ArrayList<SellerPaymentResponse>();
         List<SellerPayment> ordered = paymentRepository.findAllByOrderByPaidAtDesc();
         Map<Long, Seller> sellerIndex = indexSellers();
-        int limit = Math.min(5, ordered.size());
-        for (int i = 0; i < limit; i++) {
-            SellerPayment payment = ordered.get(i);
+        for (SellerPayment payment : ordered) {
+            LocalDate eventDate = payment.getPaidAt() != null
+                    ? payment.getPaidAt().toLocalDate()
+                    : (payment.getCreatedAt() == null ? null : payment.getCreatedAt().toLocalDate());
+            if (ranged && (eventDate == null || eventDate.isBefore(rangeFrom) || eventDate.isAfter(rangeTo))) {
+                continue;
+            }
             recent.add(toPaymentResponse(payment, sellerIndex.get(payment.getSellerId())));
+            if (recent.size() == 5) {
+                break;
+            }
         }
         response.setRecentPayments(recent);
         return response;
@@ -507,7 +549,19 @@ public class SellerAdminService {
     }
 
     private BigDecimal amountFor(SellerSubscription.Plan plan) {
-        return plan == SellerSubscription.Plan.YEARLY ? YEARLY_AMOUNT : MONTHLY_AMOUNT;
+        boolean yearly = plan == SellerSubscription.Plan.YEARLY;
+        String raw = settingsService.getSetting(yearly ? "planYearlyAmount" : "planMonthlyAmount");
+        if (raw != null && !raw.trim().isEmpty()) {
+            try {
+                BigDecimal amount = new BigDecimal(raw.trim());
+                if (amount.compareTo(BigDecimal.ZERO) > 0) {
+                    return amount;
+                }
+            } catch (NumberFormatException ignored) {
+                // Fall back to the default plan price.
+            }
+        }
+        return yearly ? YEARLY_AMOUNT : MONTHLY_AMOUNT;
     }
 
     private BigDecimal parseAmount(String value) {
@@ -587,6 +641,8 @@ public class SellerAdminService {
         response.setCity(seller.getCity());
         response.setPincode(seller.getPincode());
         response.setAccountStatus(seller.getAccountStatus().name());
+        User login = linkedLogin(seller);
+        response.setLoginActive(login == null ? null : login.getIsActive());
         response.setDeactivationReason(seller.getDeactivationReason());
         response.setAdminNote(seller.getAdminNote());
         response.setCreatedAt(seller.getCreatedAt());
@@ -644,6 +700,31 @@ public class SellerAdminService {
         return response;
     }
 
+    private User linkedLogin(Seller seller) {
+        if (seller.getUserId() != null) {
+            User byId = userRepository.findById(seller.getUserId()).orElse(null);
+            if (byId != null) {
+                return byId;
+            }
+        }
+        if (seller.getMobile() == null || seller.getMobile().trim().isEmpty()) {
+            return null;
+        }
+        return userRepository.findFirstByPhone(seller.getMobile().trim()).orElse(null);
+    }
+
+    private void setLoginActive(Seller seller, boolean active) {
+        User user = linkedLogin(seller);
+        if (user == null || user.getRole() == User.UserRole.admin) {
+            return;
+        }
+        user.setIsActive(active);
+        userRepository.save(user);
+        if (seller.getUserId() == null) {
+            seller.setUserId(user.getId());
+        }
+    }
+
     private Seller resolveSellerForUser(User user, boolean createIfMissing) {
         Seller seller = sellerRepository.findByUserId(user.getId()).orElse(null);
         if (seller == null && user.getPhone() != null && user.getPhone().trim().length() > 0) {
@@ -683,8 +764,8 @@ public class SellerAdminService {
 
     private SellerSubscriptionAccessResponse toAccessResponse(Seller seller, SellerSubscription subscription) {
         SellerSubscriptionAccessResponse response = new SellerSubscriptionAccessResponse();
-        response.setMonthlyAmount(MONTHLY_AMOUNT);
-        response.setYearlyAmount(YEARLY_AMOUNT);
+        response.setMonthlyAmount(amountFor(SellerSubscription.Plan.MONTHLY));
+        response.setYearlyAmount(amountFor(SellerSubscription.Plan.YEARLY));
         response.setBusinessName(seller != null ? seller.getBusinessName() : null);
         String status = computeSubscriptionStatus(subscription);
         response.setStatus(status);
@@ -693,7 +774,7 @@ public class SellerAdminService {
                 && subscription.getExpiryDate() != null
                 && !subscription.getExpiryDate().isBefore(LocalDate.now());
         response.setSubscribed(subscribed);
-        response.setCanWork(subscribed);
+        response.setCanWork(!subscriptionRequired() || subscribed);
         if (subscription != null) {
             response.setPlan(subscription.getPlan() != null ? subscription.getPlan().name() : null);
             response.setAmount(subscription.getAmount());
@@ -702,7 +783,7 @@ public class SellerAdminService {
             if (subscription.getExpiryDate() != null) {
                 long days = ChronoUnit.DAYS.between(LocalDate.now(), subscription.getExpiryDate());
                 response.setDaysRemaining(days);
-                boolean reminder = subscribed && days >= 0 && days <= 5;
+                boolean reminder = expiryRemindersOn() && subscribed && days >= 0 && days <= reminderWindowDays();
                 response.setShowExpiryReminder(reminder);
                 if (reminder) {
                     if (days == 0) {
@@ -716,7 +797,7 @@ public class SellerAdminService {
                 }
             }
         }
-        if (!subscribed) {
+        if (subscriptionRequired() && !subscribed) {
             if ("Expired".equals(status)) {
                 response.setReminderMessage("Your subscription has expired. Subscribe again to continue using seller features.");
             } else {
@@ -724,6 +805,73 @@ public class SellerAdminService {
             }
         }
         return response;
+    }
+
+    private int reminderWindowDays() {
+        String raw = settingsService.getSetting("expiryReminderDays");
+        if (raw == null || raw.trim().isEmpty()) {
+            return 5;
+        }
+        try {
+            int days = Integer.parseInt(raw.trim());
+            if (days < 1) {
+                return 1;
+            }
+            if (days > 60) {
+                return 60;
+            }
+            return days;
+        } catch (NumberFormatException ex) {
+            return 5;
+        }
+    }
+
+    private boolean subscriptionRequired() {
+        String raw = settingsService.getSetting("subscriptionRequired");
+        return raw == null || !"false".equalsIgnoreCase(raw.trim());
+    }
+
+    private boolean expiryRemindersOn() {
+        String raw = settingsService.getSetting("notifyExpiry");
+        return raw == null || !"false".equalsIgnoreCase(raw.trim());
+    }
+
+    private LocalDate parseFilterDate(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(text.trim());
+        } catch (Exception ex) {
+            throw new BadRequestException("Choose a valid date");
+        }
+    }
+
+    private boolean subscriptionOverlaps(SellerSubscription subscription, LocalDate from, LocalDate to) {
+        if (subscription == null) {
+            return false;
+        }
+        LocalDate created = subscription.getCreatedAt() == null ? null : subscription.getCreatedAt().toLocalDate();
+        LocalDate begin = subscription.getStartDate() != null ? subscription.getStartDate() : created;
+        LocalDate end = subscription.getExpiryDate() != null ? subscription.getExpiryDate() : to;
+        if (begin == null) {
+            return false;
+        }
+        return !begin.isAfter(to) && !end.isBefore(from);
+    }
+
+    private String subscriptionStatusAsOf(SellerSubscription subscription, LocalDate asOf) {
+        if (subscription == null || subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.PENDING
+                || subscription.getExpiryDate() == null) {
+            return "Payment Pending";
+        }
+        if (subscription.getExpiryDate().isBefore(asOf)) {
+            return "Expired";
+        }
+        if (!subscription.getExpiryDate().isAfter(asOf.plusDays(reminderWindowDays()))) {
+            return "Expiring Soon";
+        }
+        return "Active";
     }
 
     private String computeSubscriptionStatus(SellerSubscription subscription) {
@@ -739,7 +887,7 @@ public class SellerAdminService {
         if (subscription.getExpiryDate().isBefore(today)) {
             return "Expired";
         }
-        if (!subscription.getExpiryDate().isAfter(today.plusDays(7))) {
+        if (!subscription.getExpiryDate().isAfter(today.plusDays(reminderWindowDays()))) {
             return "Expiring Soon";
         }
         return "Active";

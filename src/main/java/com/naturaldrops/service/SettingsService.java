@@ -44,7 +44,9 @@ public class SettingsService {
         putDefault(settingsMap, "notifyPayments", "true");
         putDefault(settingsMap, "notifyFailedPayments", "true");
         putDefault(settingsMap, "notifyExpiry", "true");
+        putDefault(settingsMap, "expiryReminderDays", "5");
         putDefault(settingsMap, "notifySevenDayReminder", "true");
+        putDefault(settingsMap, "subscriptionRequired", "true");
         putDefault(settingsMap, "planMonthlyAmount", "499.00");
         putDefault(settingsMap, "planYearlyAmount", "5389.20");
         

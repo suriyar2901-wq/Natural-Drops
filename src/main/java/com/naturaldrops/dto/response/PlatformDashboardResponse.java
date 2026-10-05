@@ -22,6 +22,7 @@ public class PlatformDashboardResponse {
     private long expiringSoon;
     private long expired;
     private long paymentPending;
+    private long failedPayments;
     private long deactivatedAccounts;
 
     private long newSellers;

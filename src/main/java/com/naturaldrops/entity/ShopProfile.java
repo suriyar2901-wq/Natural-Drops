@@ -36,4 +36,22 @@ public class ShopProfile {
 
     @Column(name = "qr_data", columnDefinition = "TEXT")
     private String qrData;
+
+    @Column(name = "open_time", length = 5)
+    private String openTime;
+
+    @Column(name = "close_time", length = 5)
+    private String closeTime;
+
+    /** Comma-separated JS weekdays: 0 Sunday through 6 Saturday. */
+    @Column(name = "open_days", length = 20)
+    private String openDays;
+
+    /** Comma-separated leave dates, yyyy-MM-dd. */
+    @Column(name = "leave_dates", columnDefinition = "TEXT")
+    private String leaveDates;
+
+    /** Seller turns this on when buyers should see the shop time and leave days. */
+    @Column(name = "show_hours_to_buyer")
+    private Boolean showHoursToBuyer;
 }

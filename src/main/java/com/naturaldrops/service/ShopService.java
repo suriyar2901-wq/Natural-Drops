@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -187,6 +188,14 @@ public class ShopService {
         String delivery = body.get("delivery") == null ? "Today" : String.valueOf(body.get("delivery")).trim();
         LocalDate deliveryDate = resolveDeliveryDate(delivery);
         String note = body.get("note") == null ? "" : String.valueOf(body.get("note"));
+        LocalTime deliveryTime = LocalTime.of(9, 0);
+        if (body.get("deliveryTime") != null && !String.valueOf(body.get("deliveryTime")).trim().isEmpty()) {
+            try {
+                deliveryTime = LocalTime.parse(String.valueOf(body.get("deliveryTime")).trim());
+            } catch (DateTimeParseException ex) {
+                throw new BadRequestException("Choose a valid delivery time");
+            }
+        }
 
         CreateOrderRequest request = new CreateOrderRequest();
         Long buyerId = customer.getBuyerUserId() != null ? customer.getBuyerUserId() : sellerUserId;
@@ -198,7 +207,7 @@ public class ShopService {
         request.setTotal(total);
         request.setItems(items);
         Order order = orderService.createOrder(request);
-        order = orderService.schedulePhoneDelivery(order.getId(), deliveryDate, sellerUserId);
+        order = orderService.schedulePhoneDelivery(order.getId(), deliveryDate, deliveryTime, sellerUserId);
 
         customer.setMoney(customer.getMoney().add(total));
         customer.setEmptyCans(customer.getEmptyCans() + extraCans);
@@ -349,10 +358,19 @@ public class ShopService {
         if (!MOBILE.matcher(phone).matches()) {
             throw new BadRequestException("Mobile number must be 10 digits");
         }
-        String email = optional(body, "email");
-        String username = optional(body, "username");
-        if (username == null || username.trim().length() < 3) {
-            username = generateBuyerUsername(fullName, phone);
+        String email = required(body, "email", 5);
+        if (!email.matches("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) {
+            throw new BadRequestException("Email is invalid");
+        }
+        String username = required(body, "username", 3);
+        String houseDoorNo = required(body, "houseDoorNo", 1);
+        String streetArea = required(body, "streetArea", 2);
+        String city = required(body, "city", 2);
+        String district = required(body, "district", 2);
+        String state = required(body, "state", 2);
+        String pincode = required(body, "pincode", 6);
+        if (!pincode.matches("^[0-9]{6}$")) {
+            throw new BadRequestException("Pincode must be 6 digits");
         }
         username = username.trim().toLowerCase();
         if (userRepository.existsByUsername(username)) {
@@ -368,12 +386,12 @@ public class ShopService {
         buyer.setIsActive(true);
         buyer.setEmail(email);
         buyer.setPhone(phone);
-        buyer.setHouseDoorNo(optional(body, "houseDoorNo"));
-        buyer.setStreetArea(optional(body, "streetArea"));
-        buyer.setCity(optional(body, "city"));
-        buyer.setDistrict(optional(body, "district"));
-        buyer.setState(optional(body, "state"));
-        buyer.setPincode(optional(body, "pincode"));
+        buyer.setHouseDoorNo(houseDoorNo);
+        buyer.setStreetArea(streetArea);
+        buyer.setCity(city);
+        buyer.setDistrict(district);
+        buyer.setState(state);
+        buyer.setPincode(pincode);
         buyer.setCreatedAt(LocalDateTime.now());
         buyer.setCreatedBy(sellerUser.getUsername());
         buyer.setLinkedSellerId(seller.getId());
@@ -406,24 +424,6 @@ public class ShopService {
         result.put("emailSent", Boolean.valueOf(buyerEmailSent));
         result.put("sellerEmailSent", Boolean.valueOf(sellerEmailSent));
         return result;
-    }
-
-    private String generateBuyerUsername(String fullName, String phone) {
-        String letters = fullName.replaceAll("[^A-Za-z]", "").toLowerCase();
-        if (letters.length() < 3) {
-            letters = "buyer";
-        }
-        if (letters.length() > 8) {
-            letters = letters.substring(0, 8);
-        }
-        String suffix = phone.length() >= 4 ? phone.substring(phone.length() - 4) : phone;
-        String username = letters + suffix;
-        int extra = 1;
-        while (userRepository.existsByUsername(username)) {
-            username = letters + suffix + extra;
-            extra++;
-        }
-        return username;
     }
 
     private String urlEncode(String value) {
@@ -488,6 +488,25 @@ public class ShopService {
         if (incoming.getQrData() != null) {
             profile.setQrData(incoming.getQrData());
         }
+        if (incoming.getOpenTime() != null || incoming.getCloseTime() != null) {
+            String openTime = normalizeClock(incoming.getOpenTime());
+            String closeTime = normalizeClock(incoming.getCloseTime());
+            if (openTime == null || closeTime == null) {
+                throw new BadRequestException("Shop open and close time are required");
+            }
+            if (!LocalTime.parse(closeTime).isAfter(LocalTime.parse(openTime))) {
+                throw new BadRequestException("Shop close time must be after the open time");
+            }
+            profile.setOpenTime(openTime);
+            profile.setCloseTime(closeTime);
+            String openDays = normalizeDays(incoming.getOpenDays());
+            if (openDays == null) {
+                throw new BadRequestException("Select at least one open day");
+            }
+            profile.setOpenDays(openDays);
+            profile.setLeaveDates(normalizeLeaves(incoming.getLeaveDates()));
+            profile.setShowHoursToBuyer(Boolean.TRUE.equals(incoming.getShowHoursToBuyer()));
+        }
         return shopProfileRepository.save(profile);
     }
 
@@ -531,6 +550,10 @@ public class ShopService {
                 : (profile != null ? profile.getBusinessName() : null));
         result.put("companyCode", seller != null ? seller.getCompanyCode() : null);
         result.put("sellerProfilePhoto", sellerUser != null ? sellerUser.getProfilePhoto() : null);
+        if (profile == null && seller != null && seller.getUserId() != null) {
+            profile = shopProfileRepository.findBySellerUserId(seller.getUserId()).orElse(null);
+        }
+        putShopHours(result, profile);
         return result;
     }
 
@@ -542,6 +565,165 @@ public class ShopService {
             throw new ResourceNotFoundException("No shop account is linked to this buyer yet");
         }
         return recordPayment(customer.getSellerUserId(), customer.getId(), body, "buyer-claim");
+    }
+
+    private void putShopHours(Map<String, Object> result, ShopProfile profile) {
+        boolean showToBuyer = profile != null && Boolean.TRUE.equals(profile.getShowHoursToBuyer());
+        String openTime = showToBuyer && profile != null ? normalizeClock(profile.getOpenTime()) : null;
+        String closeTime = showToBuyer && profile != null ? normalizeClock(profile.getCloseTime()) : null;
+        String openDays = profile != null && profile.getOpenDays() != null ? profile.getOpenDays() : "0,1,2,3,4,5,6";
+        String leaveDates = showToBuyer && profile != null ? profile.getLeaveDates() : null;
+        result.put("shopOpenTime", openTime);
+        result.put("shopCloseTime", closeTime);
+        result.put("shopOpenDays", showToBuyer && profile != null ? profile.getOpenDays() : null);
+        result.put("shopLeaveDates", leaveDates);
+        if (openTime == null || closeTime == null) {
+            result.put("shopOpenNow", Boolean.TRUE);
+            result.put("shopNextOpenLabel", null);
+            return;
+        }
+        java.util.Set<Integer> days = daySet(openDays);
+        java.util.Set<LocalDate> leaves = leaveSet(leaveDates);
+        LocalTime open = LocalTime.parse(openTime);
+        LocalTime close = LocalTime.parse(closeTime);
+        LocalDateTime now = LocalDateTime.now();
+        boolean openNow = isOpenAt(now.toLocalDate(), now.toLocalTime(), open, close, days, leaves);
+        result.put("shopOpenNow", Boolean.valueOf(openNow));
+        result.put("shopNextOpenLabel", openNow ? null : nextOpenLabel(now, open, close, days, leaves));
+    }
+
+    private boolean isOpenAt(LocalDate date, LocalTime time, LocalTime open, LocalTime close,
+                             java.util.Set<Integer> days, java.util.Set<LocalDate> leaves) {
+        if (leaves.contains(date) || !days.contains(jsWeekday(date))) {
+            return false;
+        }
+        return !time.isBefore(open) && time.isBefore(close);
+    }
+
+    private String nextOpenLabel(LocalDateTime now, LocalTime open, LocalTime close,
+                                 java.util.Set<Integer> days, java.util.Set<LocalDate> leaves) {
+        for (int offset = 0; offset < 60; offset++) {
+            LocalDate date = now.toLocalDate().plusDays(offset);
+            if (leaves.contains(date) || !days.contains(jsWeekday(date))) {
+                continue;
+            }
+            if (offset == 0 && !now.toLocalTime().isBefore(close)) {
+                continue;
+            }
+            String when;
+            if (offset == 0) {
+                when = "today";
+            } else if (offset == 1) {
+                when = "tomorrow";
+            } else {
+                String weekday = date.getDayOfWeek().name();
+                String month = date.getMonth().name();
+                when = weekday.substring(0, 1) + weekday.substring(1).toLowerCase()
+                        + " " + date.getDayOfMonth() + " "
+                        + month.substring(0, 1) + month.substring(1, 3).toLowerCase();
+            }
+            return when + " at " + formatAmPm(open);
+        }
+        return "soon";
+    }
+
+    private int jsWeekday(LocalDate date) {
+        return date.getDayOfWeek().getValue() % 7;
+    }
+
+    private java.util.Set<Integer> daySet(String value) {
+        java.util.Set<Integer> days = new java.util.HashSet<Integer>();
+        if (value == null || value.trim().isEmpty()) {
+            for (int day = 0; day <= 6; day++) {
+                days.add(Integer.valueOf(day));
+            }
+            return days;
+        }
+        for (String part : value.split(",")) {
+            try {
+                int day = Integer.parseInt(part.trim());
+                if (day >= 0 && day <= 6) {
+                    days.add(Integer.valueOf(day));
+                }
+            } catch (NumberFormatException ignored) {
+                // skip
+            }
+        }
+        return days;
+    }
+
+    private java.util.Set<LocalDate> leaveSet(String value) {
+        java.util.Set<LocalDate> leaves = new java.util.HashSet<LocalDate>();
+        if (value == null || value.trim().isEmpty()) {
+            return leaves;
+        }
+        for (String part : value.split(",")) {
+            try {
+                leaves.add(LocalDate.parse(part.trim()));
+            } catch (DateTimeParseException ignored) {
+                // skip
+            }
+        }
+        return leaves;
+    }
+
+    private String normalizeDays(String value) {
+        java.util.Set<Integer> days = daySet(value == null ? "" : value);
+        if (value != null && value.trim().isEmpty()) {
+            return null;
+        }
+        if (days.isEmpty()) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int day = 0; day <= 6; day++) {
+            if (!days.contains(Integer.valueOf(day))) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(day);
+        }
+        return builder.length() == 0 ? null : builder.toString();
+    }
+
+    private String normalizeLeaves(String value) {
+        java.util.List<String> dates = new java.util.ArrayList<String>();
+        for (LocalDate date : leaveSet(value)) {
+            dates.add(date.toString());
+        }
+        java.util.Collections.sort(dates);
+        StringBuilder builder = new StringBuilder();
+        for (String date : dates) {
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(date);
+        }
+        return builder.toString();
+    }
+
+    private String normalizeClock(String value) {
+        if (value == null || !value.matches("^\\d{2}:\\d{2}$")) {
+            return null;
+        }
+        try {
+            LocalTime.parse(value);
+            return value;
+        } catch (DateTimeParseException ex) {
+            return null;
+        }
+    }
+
+    private String formatAmPm(LocalTime time) {
+        int hour = time.getHour();
+        String suffix = hour >= 12 ? "PM" : "AM";
+        int display = hour % 12;
+        if (display == 0) {
+            display = 12;
+        }
+        return display + ":" + String.format("%02d", time.getMinute()) + " " + suffix;
     }
 
     private void saveLedger(Long customerId, LedgerEvent.Kind kind, BigDecimal amount, String method, String reference, String createdBy) {
