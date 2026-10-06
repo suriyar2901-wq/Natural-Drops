@@ -9,7 +9,6 @@ import com.naturaldrops.entity.SellerInboxMessage;
 import com.naturaldrops.entity.ShopProfile;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.UnauthorizedException;
-import com.naturaldrops.service.RegularOrderService;
 import com.naturaldrops.service.SellerAdminService;
 import com.naturaldrops.service.ShopService;
 import javax.servlet.http.HttpServletRequest;
@@ -27,7 +26,6 @@ public class ShopController {
 
     private final ShopService shopService;
     private final SellerAdminService sellerAdminService;
-    private final RegularOrderService regularOrderService;
 
     @GetMapping("/customers")
     public ResponseEntity<ApiResponse<List<ShopCustomer>>> listCustomers(HttpServletRequest request) {
@@ -107,39 +105,6 @@ public class ShopController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> myCompany(HttpServletRequest request) {
         User user = requireStaff(request);
         return ResponseEntity.ok(ApiResponse.success(shopService.companySummary(user)));
-    }
-
-    @GetMapping("/regular-buyers")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> regularBuyers(HttpServletRequest request) {
-        User user = requireSeller(request);
-        return ResponseEntity.ok(ApiResponse.success(regularOrderService.listPlans(user)));
-    }
-
-    @PutMapping("/regular-buyers/{buyerId}")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> saveRegularBuyer(
-            @PathVariable Long buyerId,
-            @RequestBody Map<String, Object> body,
-            HttpServletRequest request) {
-        User user = requireSeller(request);
-        return ResponseEntity.ok(ApiResponse.success(
-                "Regular order saved",
-                regularOrderService.savePlan(user, buyerId, body)
-        ));
-    }
-
-    @GetMapping("/regular-orders/today")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> regularOrderPrompt(HttpServletRequest request) {
-        User user = requireSeller(request);
-        return ResponseEntity.ok(ApiResponse.success(regularOrderService.todayPrompt(user)));
-    }
-
-    @PostMapping("/regular-orders/today")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> createRegularOrders(HttpServletRequest request) {
-        User user = requireSeller(request);
-        return ResponseEntity.ok(ApiResponse.success(
-                "Regular orders created",
-                regularOrderService.createTodayOrders(user)
-        ));
     }
 
     @GetMapping("/buyers")

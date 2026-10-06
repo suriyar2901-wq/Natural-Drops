@@ -7,6 +7,8 @@ import com.naturaldrops.dto.response.ApiResponse;
 import com.naturaldrops.entity.Order;
 import com.naturaldrops.entity.OrderStatusHistory;
 import com.naturaldrops.entity.User;
+import com.naturaldrops.exception.BadRequestException;
+import com.naturaldrops.exception.UnauthorizedException;
 import com.naturaldrops.service.OrderService;
 import com.naturaldrops.service.OrderPdfExportService;
 import com.naturaldrops.service.SellerNetworkService;
@@ -19,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -57,9 +60,14 @@ public class OrderController {
     @GetMapping(value = "/{id}/export/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     public ResponseEntity<byte[]> exportSingleOrderPdf(
             @PathVariable Long id,
-            @RequestParam(required = false) String sellerName
+            @RequestParam(required = false) String sellerName,
+            HttpServletRequest request
     ) {
         Order order = orderService.getOrderById(id);
+        User user = currentUser(request);
+        if (user != null && user.getRole() == User.UserRole.buyer && !user.getId().equals(order.getBuyerId())) {
+            throw new UnauthorizedException("You can export only your orders");
+        }
         byte[] pdf = orderPdfExportService.generateSingleOrderPdf(order, sellerName != null ? sellerName : "Seller");
         String date = java.time.LocalDate.now().toString();
         String filename = "order_" + id + "_" + date + ".pdf";
@@ -75,12 +83,19 @@ public class OrderController {
             @RequestParam(required = false) String toDate,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String sellerName,
+            @RequestParam(required = false) String kind,
             HttpServletRequest request
     ) {
+        User user = currentUser(request);
         List<Order> orders = sellerNetworkService.scopeOrders(
                 orderService.getOrdersFiltered(status, fromDate, toDate),
-                currentUser(request)
+                user
         );
+        orders = ordersForBuyer(orders, user);
+        orders = ordersByKind(orders, kind);
+        if (orders.isEmpty()) {
+            throw new BadRequestException("No orders in this date range");
+        }
         byte[] pdf = orderPdfExportService.generateMultiOrderPdf(orders, sellerName != null ? sellerName : "Seller");
         String date = java.time.LocalDate.now().toString();
         String filename = "orders_" + date + ".pdf";
@@ -268,6 +283,41 @@ public class OrderController {
 
     private User currentUser(HttpServletRequest request) {
         return (User) request.getAttribute("currentUser");
+    }
+
+    private List<Order> ordersForBuyer(List<Order> orders, User user) {
+        if (user == null || user.getRole() != User.UserRole.buyer) {
+            return orders;
+        }
+        List<Order> mine = new ArrayList<Order>();
+        if (orders == null) {
+            return mine;
+        }
+        for (Order order : orders) {
+            if (user.getId().equals(order.getBuyerId())) {
+                mine.add(order);
+            }
+        }
+        return mine;
+    }
+
+    private List<Order> ordersByKind(List<Order> orders, String kind) {
+        if (orders == null || kind == null || kind.trim().isEmpty() || "all".equalsIgnoreCase(kind.trim())) {
+            return orders == null ? new ArrayList<Order>() : orders;
+        }
+        boolean regular = "regular".equalsIgnoreCase(kind.trim());
+        if (!regular && !"normal".equalsIgnoreCase(kind.trim())) {
+            return orders;
+        }
+        List<Order> filtered = new ArrayList<Order>();
+        for (Order order : orders) {
+            String notes = order.getBillingNotes() == null ? "" : order.getBillingNotes().toLowerCase();
+            boolean isRegular = notes.contains("regular");
+            if (regular == isRegular) {
+                filtered.add(order);
+            }
+        }
+        return filtered;
     }
 }
 

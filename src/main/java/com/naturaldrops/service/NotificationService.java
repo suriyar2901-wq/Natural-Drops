@@ -100,33 +100,6 @@ public class NotificationService {
     }
 
     @Transactional
-    public void createBuyerMessage(Order order, String message) {
-        if (order.getBuyerId() == null || message == null || message.trim().isEmpty()) {
-            return;
-        }
-        BuyerNotification notification = new BuyerNotification();
-        notification.setBuyerId(order.getBuyerId());
-        notification.setOrderId(order.getId());
-        notification.setMessage(message.trim());
-        notification.setIsRead(false);
-        notification.setCreatedAt(LocalDateTime.now());
-        buyerNotificationRepository.save(notification);
-        try {
-            Map<String, Object> notificationData = new HashMap<String, Object>();
-            notificationData.put("orderId", order.getId());
-            notificationData.put("type", "regular_order");
-            pushNotificationService.sendNotificationToBuyer(
-                    order.getBuyerId(),
-                    "Regular order",
-                    message.trim(),
-                    notificationData
-            );
-        } catch (Exception e) {
-            System.err.println("Failed to send regular order push: " + e.getMessage());
-        }
-    }
-    
-    @Transactional
     public void markAdminNotificationAsRead(Long notificationId) {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Notification not found"));
@@ -280,8 +253,11 @@ public class NotificationService {
         if (order.getEstimatedDelivery() != null) {
             timeLabel = " at " + order.getEstimatedDelivery().format(DateTimeFormatter.ofPattern("hh:mm a"));
         }
-        String title = "Delivery tomorrow";
-        String message = "Delivery reminder: Order #" + order.getId() + " for " + order.getBuyerName()
+        boolean regular = order.getBillingNotes() != null
+                && order.getBillingNotes().toLowerCase().contains("regular");
+        String title = regular ? "Regular order tomorrow" : "Delivery tomorrow";
+        String message = (regular ? "Regular order: Order #" : "Delivery reminder: Order #")
+                + order.getId() + " for " + order.getBuyerName()
                 + " is scheduled for delivery tomorrow (" + dateLabel + timeLabel + ").";
 
         Map<String, Object> data = new HashMap<String, Object>();

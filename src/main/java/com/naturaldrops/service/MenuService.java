@@ -148,7 +148,9 @@ public class MenuService {
         menuItem.setDescription(normalizeDescription(menuItemDetails.getDescription()));
 
         menuItem.setStockQuantity(menuItemDetails.getStockQuantity());
-        menuItem.setLowStockThreshold(menuItemDetails.getLowStockThreshold());
+        if (menuItemDetails.getLowStockThreshold() != null) {
+            menuItem.setLowStockThreshold(menuItemDetails.getLowStockThreshold());
+        }
         menuItem.setRate(menuItemDetails.getRate());
         menuItem.setUpdatedAt(LocalDateTime.now());
         

@@ -1,5 +1,6 @@
 package com.naturaldrops.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -7,19 +8,21 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 
 @Entity
-@Table(name = "regular_buyer_items")
+@Table(name = "buyer_regular_items")
 @Data
 @NoArgsConstructor
-public class RegularBuyerItem {
+public class BuyerRegularItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "plan_id", nullable = false)
-    private Long planId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "plan_id", nullable = false)
+    @JsonIgnore
+    private BuyerRegularPlan plan;
 
-    @Column(name = "menu_item_id", nullable = false)
+    @Column(name = "menu_item_id")
     private Long menuItemId;
 
     @Column(name = "item_name", nullable = false, length = 100)
