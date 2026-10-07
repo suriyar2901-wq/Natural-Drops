@@ -155,7 +155,8 @@ public class DashboardService {
                 productsCount,
                 dateRangeLabel,
                 todayOrders,
-                buildMonthlyRevenue(currentUser, fromDate, toDate)
+                buildMonthlyRevenue(currentUser, fromDate, toDate),
+                buildEarningsGraph(orders, fromDate, toDate)
         );
     }
 
@@ -249,6 +250,108 @@ public class DashboardService {
             ));
         }
         return points;
+    }
+
+    private List<MonthlyRevenuePoint> buildEarningsGraph(List<Order> orders, LocalDate fromDate, LocalDate toDate) {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusMonths(5).withDayOfMonth(1);
+        boolean daily = false;
+        if (fromDate != null && toDate != null && !toDate.isBefore(fromDate)) {
+            start = fromDate;
+            end = toDate;
+            daily = ChronoUnit.DAYS.between(start, end) <= 31;
+        }
+        DateTimeFormatter labelFormat = daily
+                ? DateTimeFormatter.ofPattern("d MMM")
+                : DateTimeFormatter.ofPattern("MMM");
+        Map<String, BigDecimal> paidMap = new HashMap<String, BigDecimal>();
+        Map<String, BigDecimal> partialMap = new HashMap<String, BigDecimal>();
+        Map<String, BigDecimal> dueMap = new HashMap<String, BigDecimal>();
+        Map<String, Long> counts = new HashMap<String, Long>();
+        for (Order order : orders) {
+            if (order.getOrderDate() == null || order.getStatus() == Order.OrderStatus.canceled) {
+                continue;
+            }
+            LocalDate orderDay = order.getOrderDate().toLocalDate();
+            if (orderDay.isBefore(start) || orderDay.isAfter(end)) {
+                continue;
+            }
+            String key = daily ? orderDay.toString() : monthKey(orderDay);
+            BigDecimal orderTotal = order.getTotal() != null ? order.getTotal() : BigDecimal.ZERO;
+            BigDecimal billed = order.getFinalBillAmount();
+            BigDecimal paid = BigDecimal.ZERO;
+            BigDecimal partial = BigDecimal.ZERO;
+            BigDecimal due = BigDecimal.ZERO;
+            if (order.getPaymentStatus() == Order.PaymentStatus.PAID) {
+                paid = billed != null ? billed : orderTotal;
+            } else if (order.getPaymentStatus() == Order.PaymentStatus.PARTIALLY_PAID) {
+                partial = billed != null ? billed : BigDecimal.ZERO;
+                if (partial.compareTo(orderTotal) > 0) {
+                    partial = orderTotal;
+                }
+                if (partial.compareTo(BigDecimal.ZERO) < 0) {
+                    partial = BigDecimal.ZERO;
+                }
+                due = orderTotal.subtract(partial);
+                if (due.compareTo(BigDecimal.ZERO) < 0) {
+                    due = BigDecimal.ZERO;
+                }
+            } else {
+                due = orderTotal;
+            }
+            paidMap.put(key, addMoney(paidMap.get(key), paid));
+            partialMap.put(key, addMoney(partialMap.get(key), partial));
+            dueMap.put(key, addMoney(dueMap.get(key), due));
+            Long count = counts.get(key);
+            counts.put(key, count == null ? 1L : count + 1L);
+        }
+        List<MonthlyRevenuePoint> points = new ArrayList<MonthlyRevenuePoint>();
+        if (daily) {
+            for (LocalDate day = start; !day.isAfter(end); day = day.plusDays(1)) {
+                points.add(earningsPoint(day.format(labelFormat), day.toString(), paidMap, partialMap, dueMap, counts));
+            }
+        } else {
+            LocalDate month = start.withDayOfMonth(1);
+            LocalDate last = end.withDayOfMonth(1);
+            while (!month.isAfter(last)) {
+                points.add(earningsPoint(month.format(labelFormat), monthKey(month), paidMap, partialMap, dueMap, counts));
+                month = month.plusMonths(1);
+            }
+        }
+        return points;
+    }
+
+    private MonthlyRevenuePoint earningsPoint(
+            String label,
+            String key,
+            Map<String, BigDecimal> paidMap,
+            Map<String, BigDecimal> partialMap,
+            Map<String, BigDecimal> dueMap,
+            Map<String, Long> counts) {
+        BigDecimal paid = paidMap.get(key);
+        BigDecimal partial = partialMap.get(key);
+        BigDecimal due = dueMap.get(key);
+        if (paid == null) {
+            paid = BigDecimal.ZERO;
+        }
+        if (partial == null) {
+            partial = BigDecimal.ZERO;
+        }
+        if (due == null) {
+            due = BigDecimal.ZERO;
+        }
+        Long count = counts.get(key);
+        if (count == null) {
+            count = 0L;
+        }
+        return new MonthlyRevenuePoint(label, key, paid, partial, paid.add(partial).add(due), count);
+    }
+
+    private BigDecimal addMoney(BigDecimal current, BigDecimal amount) {
+        if (current == null) {
+            return amount;
+        }
+        return current.add(amount);
     }
 
     private String monthKey(LocalDate date) {

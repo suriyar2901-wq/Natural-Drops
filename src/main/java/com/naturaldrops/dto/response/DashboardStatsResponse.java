@@ -23,5 +23,6 @@ public class DashboardStatsResponse {
     private String dateRangeLabel; // e.g., "Jan 1 - Jan 31, 2026" or "All Time"
     private Long todayOrders; // Count of today's orders (only when showing all-time stats)
     private List<MonthlyRevenuePoint> monthlyRevenue = new ArrayList<MonthlyRevenuePoint>();
+    private List<MonthlyRevenuePoint> earningsGraph = new ArrayList<MonthlyRevenuePoint>();
 }
 

@@ -9,6 +9,8 @@ import com.naturaldrops.entity.SellerInboxMessage;
 import com.naturaldrops.entity.ShopProfile;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.UnauthorizedException;
+import com.naturaldrops.service.CanAccountService;
+import com.naturaldrops.service.PincodeLookupService;
 import com.naturaldrops.service.SellerAdminService;
 import com.naturaldrops.service.ShopService;
 import javax.servlet.http.HttpServletRequest;
@@ -26,6 +28,8 @@ public class ShopController {
 
     private final ShopService shopService;
     private final SellerAdminService sellerAdminService;
+    private final CanAccountService canAccountService;
+    private final PincodeLookupService pincodeLookupService;
 
     @GetMapping("/customers")
     public ResponseEntity<ApiResponse<List<ShopCustomer>>> listCustomers(HttpServletRequest request) {
@@ -95,10 +99,57 @@ public class ShopController {
         return ResponseEntity.ok(ApiResponse.success("Phone order created", shopService.createPhoneOrder(user.getId(), body, user.getUsername())));
     }
 
+    @PostMapping("/customers/{id}/can-actions")
+    public ResponseEntity<ApiResponse<ShopCustomer>> canAction(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User user = requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success("Can entry saved", canAccountService.apply(user.getId(), id, body)));
+    }
+
     @GetMapping("/can-ledger")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> canLedger(HttpServletRequest request) {
         User user = requireStaff(request);
         return ResponseEntity.ok(ApiResponse.success(shopService.canLedger(user.getId())));
+    }
+
+    @GetMapping("/can-stock")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> canStock(HttpServletRequest request) {
+        User user = requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success(canAccountService.summary(user.getId())));
+    }
+
+    @PutMapping("/can-stock")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> saveCanDeposit(
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User user = requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success("Can deposit amount saved", canAccountService.saveDepositRate(user.getId(), body)));
+    }
+
+    @PostMapping("/can-stock/adjust")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> adjustCanStock(
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User user = requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success("Seller can stock updated", canAccountService.adjustStock(user.getId(), body)));
+    }
+
+    @GetMapping("/can-report")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> canReport(
+            @RequestParam(required = false) String date,
+            HttpServletRequest request) {
+        User user = requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success(canAccountService.collectionReport(user.getId(), date)));
+    }
+
+    @GetMapping("/pincode/{code}")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> lookupPincode(
+            @PathVariable String code,
+            HttpServletRequest request) {
+        requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success(pincodeLookupService.lookup(code)));
     }
 
     @GetMapping("/company")

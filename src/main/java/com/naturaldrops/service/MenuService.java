@@ -125,6 +125,9 @@ public class MenuService {
         }
         menuItem.setCreatedAt(LocalDateTime.now());
         menuItem.setUpdatedAt(LocalDateTime.now());
+        if (menuItem.getStockQuantity() == null) {
+            menuItem.setStockQuantity(0);
+        }
         if (menuItem.getLowStockThreshold() == null) {
             menuItem.setLowStockThreshold(10);
         }
@@ -147,7 +150,9 @@ public class MenuService {
         
         menuItem.setDescription(normalizeDescription(menuItemDetails.getDescription()));
 
-        menuItem.setStockQuantity(menuItemDetails.getStockQuantity());
+        if (menuItemDetails.getStockQuantity() != null) {
+            menuItem.setStockQuantity(menuItemDetails.getStockQuantity());
+        }
         if (menuItemDetails.getLowStockThreshold() != null) {
             menuItem.setLowStockThreshold(menuItemDetails.getLowStockThreshold());
         }
@@ -204,8 +209,7 @@ public class MenuService {
             return;
         }
         if (quantityBefore < requested) {
-            throw new IllegalStateException("Insufficient stock for menu item: " + menuItem.getName()
-                    + ". Available: " + quantityBefore + ", requested: " + requested);
+            return;
         }
         
         menuItem.setStockQuantity(quantityBefore - requested);

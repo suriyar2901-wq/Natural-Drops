@@ -55,6 +55,9 @@ public class ShopCustomer {
     @Column(nullable = false)
     private Integer emptyCans = 0;
 
+    @Column(name = "can_deposit", precision = 10, scale = 2)
+    private BigDecimal canDeposit = BigDecimal.ZERO;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -71,6 +74,9 @@ public class ShopCustomer {
         }
         if (emptyCans == null) {
             emptyCans = 0;
+        }
+        if (canDeposit == null) {
+            canDeposit = BigDecimal.ZERO;
         }
     }
 

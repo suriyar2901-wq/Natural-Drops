@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -23,6 +24,17 @@ public class CanEvent {
 
     @Column(nullable = false)
     private Integer changeAmount;
+
+    @Column(name = "event_type", length = 20)
+    private String eventType;
+
+    private Integer quantity;
+
+    @Column(precision = 10, scale = 2)
+    private BigDecimal amount;
+
+    @Column(length = 200)
+    private String note;
 
     @Column(length = 200)
     private String copy;

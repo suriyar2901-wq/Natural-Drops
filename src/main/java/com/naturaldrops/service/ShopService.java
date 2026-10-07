@@ -49,6 +49,7 @@ public class ShopService {
     private final SellerNetworkService sellerNetworkService;
     private final AuthService authService;
     private final EmailService emailService;
+    private final CanAccountService canAccountService;
 
     @Transactional(readOnly = true)
     public List<ShopCustomer> listCustomers(Long sellerUserId) {
@@ -150,10 +151,13 @@ public class ShopService {
             throw new BadRequestException("Cannot collect more cans than the customer holds");
         }
         customer.setEmptyCans(customer.getEmptyCans() - qty);
-        customerRepository.save(customer);
+        BigDecimal released = canAccountService.afterReturn(sellerUserId, customer, qty);
         CanEvent event = new CanEvent();
         event.setCustomerId(customer.getId());
+        event.setEventType("RETURNED");
         event.setChangeAmount(-qty);
+        event.setQuantity(qty);
+        event.setAmount(released.negate());
         event.setCopy("Returned " + qty + " empty can(s)");
         event.setOccurredAt(LocalDateTime.now());
         canEventRepository.save(event);
@@ -214,9 +218,13 @@ public class ShopService {
         customerRepository.save(customer);
         saveLedger(customer.getId(), LedgerEvent.Kind.BILL, total, "PAY_LATER", "ORD-" + order.getId(), createdBy);
         if (extraCans > 0) {
+            BigDecimal deposit = canAccountService.afterIssue(sellerUserId, customer, extraCans);
             CanEvent event = new CanEvent();
             event.setCustomerId(customer.getId());
+            event.setEventType("ISSUED");
             event.setChangeAmount(extraCans);
+            event.setQuantity(extraCans);
+            event.setAmount(deposit);
             event.setCopy("Issued " + extraCans + " can(s) with phone order #" + order.getId());
             event.setOccurredAt(LocalDateTime.now());
             canEventRepository.save(event);
@@ -303,12 +311,26 @@ public class ShopService {
         for (ShopCustomer customer : listCustomers(sellerUserId)) {
             int given = 0;
             int returned = 0;
+            int damaged = 0;
+            int missing = 0;
             for (CanEvent event : canEventRepository.findByCustomerIdOrderByOccurredAtDesc(customer.getId())) {
+                String type = event.getEventType() == null ? "" : event.getEventType().trim().toUpperCase();
                 int quantity = event.getChangeAmount() != null ? event.getChangeAmount() : 0;
-                if (quantity > 0) {
-                    given += quantity;
-                } else {
-                    returned += Math.abs(quantity);
+                int abs = event.getQuantity() != null ? Math.abs(event.getQuantity()) : Math.abs(quantity);
+                if (type.isEmpty()) {
+                    if (quantity > 0) {
+                        given += quantity;
+                    } else {
+                        returned += Math.abs(quantity);
+                    }
+                } else if ("ISSUED".equals(type)) {
+                    given += abs;
+                } else if ("RETURNED".equals(type)) {
+                    returned += abs;
+                } else if ("DAMAGED".equals(type)) {
+                    damaged += abs;
+                } else if ("MISSING".equals(type)) {
+                    missing += abs;
                 }
             }
             int toReturn = customer.getEmptyCans() != null ? customer.getEmptyCans() : 0;
@@ -319,6 +341,9 @@ public class ShopService {
             row.put("given", given);
             row.put("returned", returned);
             row.put("toReturn", toReturn);
+            row.put("damaged", damaged);
+            row.put("missing", missing);
+            row.put("deposit", customer.getCanDeposit() == null ? BigDecimal.ZERO : customer.getCanDeposit());
             rows.add(row);
         }
         rows.sort((left, right) -> {

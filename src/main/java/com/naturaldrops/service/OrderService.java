@@ -41,6 +41,7 @@ public class OrderService {
     private final ShopCustomerRepository shopCustomerRepository;
     private final CanEventRepository canEventRepository;
     private final UserRepository userRepository;
+    private final CanAccountService canAccountService;
     
     public List<Order> getAllOrders() {
         return orderRepository.findAllByOrderByOrderDateDesc();
@@ -248,9 +249,13 @@ public class OrderService {
         }
         customer.setEmptyCans((customer.getEmptyCans() == null ? 0 : customer.getEmptyCans()) + cans);
         shopCustomerRepository.save(customer);
+        BigDecimal deposit = canAccountService.afterIssue(customer.getSellerUserId(), customer, cans);
         CanEvent event = new CanEvent();
         event.setCustomerId(customer.getId());
+        event.setEventType("ISSUED");
         event.setChangeAmount(cans);
+        event.setQuantity(cans);
+        event.setAmount(deposit);
         event.setCopy("Issued " + cans + " can(s) with order #" + order.getId());
         event.setOccurredAt(LocalDateTime.now());
         canEventRepository.save(event);
