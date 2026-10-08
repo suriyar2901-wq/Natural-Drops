@@ -50,6 +50,7 @@ public class ShopService {
     private final AuthService authService;
     private final EmailService emailService;
     private final CanAccountService canAccountService;
+    private final AccountIdentityService accountIdentityService;
 
     @Transactional(readOnly = true)
     public List<ShopCustomer> listCustomers(Long sellerUserId) {
@@ -387,6 +388,7 @@ public class ShopService {
         if (!email.matches("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) {
             throw new BadRequestException("Email is invalid");
         }
+        accountIdentityService.rejectDuplicateContact(phone, email, null, null);
         String username = required(body, "username", 3);
         String houseDoorNo = required(body, "houseDoorNo", 1);
         String streetArea = required(body, "streetArea", 2);
@@ -424,9 +426,7 @@ public class ShopService {
         sellerNetworkService.linkBuyerToCompany(saved, seller.getCompanyCode(), false);
         Map<String, String> invite = authService.createInvite(saved);
         String resetLink = invite.get("resetLink");
-        String shareMessage = "Your buyer account for " + seller.getBusinessName()
-                + " is ready. Username: " + username
-                + ". Create your password here: " + resetLink;
+        String shareMessage = AccountNotice.message(fullName, username, invite.get("appUrl"), resetLink);
         boolean buyerEmailSent = emailService.sendBuyerInvite(email, fullName, username, seller.getBusinessName(), resetLink);
         boolean sellerEmailSent = emailService.sendBuyerInviteCopy(
                 sellerUser.getEmail(),
@@ -444,19 +444,11 @@ public class ShopService {
         result.put("inviteLink", resetLink);
         result.put("otp", invite.get("otp"));
         result.put("shareMessage", shareMessage);
-        result.put("whatsappUrl", "https://wa.me/91" + phone + "?text=" + urlEncode(shareMessage));
-        result.put("smsUrl", "sms:+91" + phone + "?body=" + urlEncode(shareMessage));
+        result.put("whatsappUrl", AccountNotice.whatsappUrl(phone, shareMessage));
+        result.put("smsUrl", AccountNotice.smsUrl(phone, shareMessage));
         result.put("emailSent", Boolean.valueOf(buyerEmailSent));
         result.put("sellerEmailSent", Boolean.valueOf(sellerEmailSent));
         return result;
-    }
-
-    private String urlEncode(String value) {
-        try {
-            return java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20");
-        } catch (Exception e) {
-            return value;
-        }
     }
 
     @Transactional(readOnly = true)

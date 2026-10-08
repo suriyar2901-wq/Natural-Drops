@@ -59,6 +59,7 @@ public class SellerSubscription {
     }
 
     public enum Plan {
+        FREE,
         MONTHLY,
         YEARLY
     }

@@ -22,43 +22,24 @@ public class EmailService {
     @Value("${app.base-url:http://localhost:8080}")
     private String baseUrl;
     
-    public boolean sendPasswordResetToken(String toEmail, String userName, String token, String otp) {
+    public boolean sendPasswordResetToken(String toEmail, String displayName, String username, String token, String otp) {
         try {
             // Validate email configuration
-            if (fromEmail == null || fromEmail.contains("your-email") || fromEmail.contains("no-reply")) {
-                log.error("Email not configured. Please set spring.mail.username in application.properties");
+            if (!mailReady()) {
                 return false;
             }
             
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
             message.setTo(toEmail);
-            message.setSubject("Reset Your Natural Drops Password");
+            message.setSubject("Your Natural Drops account");
             
-            // Generate reset link pointing to frontend ResetPassword screen
-            // Frontend route: /ResetPassword (React Navigation screen name)
-            // For web, the route should match the navigation screen name
             String resetLink = baseUrl + "/ResetPassword?token=" + token;
-            
-            // Use provided userName or fallback to generic greeting
-            String displayName = (userName != null && !userName.trim().isEmpty()) ? userName : "Valued Customer";
-            
-            // Enhanced email template with user's name
-            String emailBody = String.format(
-                "Dear %s,\n\n" +
-                "You have requested to reset your password for your Natural Drops account.\n\n" +
-                "To reset your password, you can use one of the following methods:\n\n" +
-                "Method 1 – Reset using link:\n" +
-                "%s\n\n" +
-                "Method 2 – Reset using OTP:\n" +
-                "%s\n\n" +
-                "Note:\n" +
-                "This link and OTP will expire in 15 minutes.\n\n" +
-                "If you did not request this password reset, please ignore this email.\n\n" +
-                "Best regards,\n" +
-                "Natural Drops Team",
-                displayName, resetLink, otp
-            );
+            String safeName = (displayName != null && !displayName.trim().isEmpty()) ? displayName : username;
+            String emailBody = AccountNotice.message(safeName, username, baseUrl, resetLink);
+            if (otp != null && otp.trim().length() > 0) {
+                emailBody = emailBody + "\nYou can also reset with this OTP: " + otp + "\n";
+            }
             
             message.setText(emailBody);
             
@@ -102,8 +83,7 @@ public class EmailService {
             return false;
         }
         try {
-            if (fromEmail == null || fromEmail.contains("your-email") || fromEmail.contains("no-reply")) {
-                log.error("Email not configured. Please set spring.mail.username in application.properties");
+            if (!mailReady()) {
                 return false;
             }
             SimpleMailMessage message = new SimpleMailMessage();
@@ -111,17 +91,8 @@ public class EmailService {
             message.setTo(toEmail.trim());
             message.setSubject("Your " + (companyName != null ? companyName : "Natural Drops") + " buyer account");
             String displayName = buyerName != null && buyerName.trim().length() > 0 ? buyerName : username;
-            message.setText(
-                    "Dear " + displayName + ",\n\n" +
-                    "A buyer account was created for you.\n\n" +
-                    "Company: " + (companyName != null ? companyName : "Natural Drops") + "\n" +
-                    "Username: " + username + "\n\n" +
-                    "Open this link and create your new password to log in:\n" +
-                    resetLink + "\n\n" +
-                    "This link is valid for 15 minutes.\n\n" +
-                    "Best regards,\n" +
-                    "Natural Drops"
-            );
+            message.setText(AccountNotice.message(displayName, username, baseUrl, resetLink)
+                    + "\nCompany: " + (companyName != null ? companyName : "Natural Drops") + "\n");
             mailSender.send(message);
             log.info("Buyer invite email sent to: {}", toEmail);
             return true;
@@ -136,7 +107,7 @@ public class EmailService {
             return false;
         }
         try {
-            if (fromEmail == null || fromEmail.contains("your-email") || fromEmail.contains("no-reply")) {
+            if (!mailReady()) {
                 return false;
             }
             SimpleMailMessage message = new SimpleMailMessage();
@@ -165,8 +136,7 @@ public class EmailService {
     public boolean sendPasswordResetOtp(String toEmail, String otp) {
         try {
             // Validate email configuration
-            if (fromEmail == null || fromEmail.contains("your-email") || fromEmail.contains("no-reply")) {
-                log.error("Email not configured. Please set spring.mail.username in application.properties");
+            if (!mailReady()) {
                 return false;
             }
             
@@ -221,6 +191,36 @@ public class EmailService {
             log.error("Stack trace:", e);
             return false;
         }
+    }
+
+    public boolean sendAccountDetails(String toEmail, String displayName, String username, String resetLink) {
+        if (toEmail == null || toEmail.trim().isEmpty() || !toEmail.contains("@")) {
+            return false;
+        }
+        if (!mailReady()) {
+            return false;
+        }
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);
+            message.setTo(toEmail.trim());
+            message.setSubject("Your Natural Drops account");
+            message.setText(AccountNotice.message(displayName, username, baseUrl, resetLink));
+            mailSender.send(message);
+            log.info("Account details email sent to {}", toEmail);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to send account details email to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean mailReady() {
+        if (fromEmail == null || fromEmail.trim().isEmpty() || fromEmail.contains("your-email")) {
+            log.error("Email not configured. Set MAIL_USERNAME and MAIL_PASSWORD.");
+            return false;
+        }
+        return true;
     }
 }
 

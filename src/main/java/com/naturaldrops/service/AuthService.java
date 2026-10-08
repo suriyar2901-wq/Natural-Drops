@@ -44,6 +44,7 @@ public class AuthService {
     private final EmailService emailService;
     private final JwtTokenProvider jwtTokenProvider;
     private final SellerNetworkService sellerNetworkService;
+    private final AccountIdentityService accountIdentityService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private static final SecureRandom random = new SecureRandom();
 
@@ -65,6 +66,7 @@ public class AuthService {
             log.warn("❌ [AuthService] Registration failed - Username already exists: {}", request.getUsername());
             throw new IllegalArgumentException("Username already exists");
         }
+        accountIdentityService.rejectDuplicateContact(request.getPhone(), request.getEmail(), null, null);
         log.info("✅ [AuthService] Username available");
         
         User user = new User();
@@ -140,6 +142,14 @@ public class AuthService {
         log.info("   Status: {}", savedUser.getStatus());
         log.info("   isActive: {} (new accounts start active; admin can deactivate later)", savedUser.getIsActive());
         log.info("   Timestamp: {}", LocalDateTime.now());
+        try {
+            Map<String, String> invite = createInvite(savedUser);
+            String displayName = savedUser.getFullName() != null && savedUser.getFullName().trim().length() > 0
+                    ? savedUser.getFullName() : savedUser.getUsername();
+            emailService.sendAccountDetails(savedUser.getEmail(), displayName, savedUser.getUsername(), invite.get("resetLink"));
+        } catch (Exception noticeError) {
+            log.warn("Account details email was not sent for {}: {}", savedUser.getUsername(), noticeError.getMessage());
+        }
         log.info("═══════════════════════════════════════════════════════");
         
         return savedUser;
@@ -397,47 +407,47 @@ public class AuthService {
     
     @Transactional
     public void requestPasswordReset(ForgotPasswordRequest request) {
-        // Security best practice: Don't reveal if email exists
-        // Use findFirstByEmail to handle cases where multiple users have the same email
-        Optional<User> userOptional = userRepository.findFirstByEmail(request.getEmail());
-        
-        if (userOptional.isPresent()) {
-            User user = userOptional.get();
-            
-            // Delete any existing unused tokens for this user
-            passwordResetTokenRepository.deleteExpiredTokens(LocalDateTime.now());
-            
-            // Generate token and OTP
-            String token = UUID.randomUUID().toString();
-            String otp = generateOtp();
-            
-            // Create reset token entity
-            PasswordResetToken resetToken = new PasswordResetToken();
-            resetToken.setUserId(user.getId());
-            resetToken.setToken(token);
-            resetToken.setOtp(otp);
-            resetToken.setExpiryTime(LocalDateTime.now().plusMinutes(15));
-            resetToken.setUsed(false);
-            
-            passwordResetTokenRepository.save(resetToken);
-            
-            // Get user's name for personalized email (prefer fullName, fallback to username)
-            String userName = (user.getFullName() != null && !user.getFullName().trim().isEmpty()) 
-                    ? user.getFullName() 
-                    : user.getUsername();
-            
-            // Send email with both token and OTP, including user's name for personalization
-            // If email fails, still return success (security best practice - don't reveal if email exists)
-            // The token/OTP is still created, so user can reset password if they know the OTP
-            boolean emailSent = emailService.sendPasswordResetToken(user.getEmail(), userName, token, otp);
-            if (!emailSent) {
-                // SECURITY: Do NOT log token or OTP - they are sensitive
-                log.warn("Password reset token created for user {} but email failed to send. " +
-                        "Token and OTP are available in database but email delivery failed.", user.getEmail());
-            }
+        String username = request.getUsername() == null ? "" : request.getUsername().trim();
+        if (username.isEmpty() && request.getEmail() != null) {
+            username = request.getEmail().trim();
         }
-        
-        // Always return success message (security best practice - don't reveal if email exists)
+        if (username.contains("@")) {
+            throw new BadRequestException("Enter the account username. The reset link is sent to the email saved on that account.");
+        }
+        if (username.isEmpty()) {
+            throw new BadRequestException("Enter the account username");
+        }
+        Optional<User> userOptional = userRepository.findByUsername(username);
+        if (!userOptional.isPresent()) {
+            userOptional = userRepository.findByUsername(username.toLowerCase());
+        }
+        if (!userOptional.isPresent()) {
+            throw new BadRequestException("No account found for this username.");
+        }
+        User user = userOptional.get();
+        if (user.getEmail() == null || !user.getEmail().contains("@")) {
+            throw new BadRequestException("This account has no email. The reset link cannot be sent.");
+        }
+
+        passwordResetTokenRepository.deleteExpiredTokens(LocalDateTime.now());
+        String token = UUID.randomUUID().toString();
+        String otp = generateOtp();
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUserId(user.getId());
+        resetToken.setToken(token);
+        resetToken.setOtp(otp);
+        resetToken.setExpiryTime(LocalDateTime.now().plusMinutes(15));
+        resetToken.setUsed(false);
+        passwordResetTokenRepository.save(resetToken);
+
+        String userName = (user.getFullName() != null && !user.getFullName().trim().isEmpty())
+                ? user.getFullName()
+                : user.getUsername();
+        boolean emailSent = emailService.sendPasswordResetToken(user.getEmail(), userName, user.getUsername(), token, otp);
+        if (!emailSent) {
+            log.warn("Password reset email failed for username {}", user.getUsername());
+            throw new BadRequestException("Could not send the reset link to the account email. Try again.");
+        }
     }
     
     @Transactional
@@ -515,6 +525,7 @@ public class AuthService {
         Map<String, String> result = new HashMap<String, String>();
         result.put("token", token);
         result.put("otp", otp);
+        result.put("appUrl", frontendBaseUrl);
         result.put("resetLink", frontendBaseUrl + "/ResetPassword?token=" + token);
         return result;
     }

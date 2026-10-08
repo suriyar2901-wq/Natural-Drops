@@ -47,6 +47,11 @@ public class SettingsController {
         return ResponseEntity.ok(ApiResponse.success("Customer contact number updated successfully", null));
     }
 
+    @GetMapping("/support-contacts")
+    public ResponseEntity<ApiResponse<Map<String, String>>> getSupportContacts() {
+        return ResponseEntity.ok(ApiResponse.success(settingsService.supportContacts()));
+    }
+
     @GetMapping("/customer-support-email")
     public ResponseEntity<ApiResponse<String>> getCustomerSupportEmail() {
         String value = settingsService.getSetting(CUSTOMER_SUPPORT_EMAIL_KEY);

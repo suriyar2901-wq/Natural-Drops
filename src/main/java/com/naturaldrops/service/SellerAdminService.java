@@ -56,6 +56,9 @@ public class SellerAdminService {
     private final SettingsService settingsService;
     private final OrderRepository orderRepository;
     private final SellerNetworkService sellerNetworkService;
+    private final AuthService authService;
+    private final EmailService emailService;
+    private final AccountIdentityService accountIdentityService;
 
     @Transactional(readOnly = true)
     public List<SellerAdminResponse> listSellers() {
@@ -87,20 +90,27 @@ public class SellerAdminService {
         seller.setArea(request.getArea().trim());
         seller.setCity(request.getCity().trim());
         seller.setPincode(request.getPincode().trim());
-        seller.setAccountStatus(Seller.AccountStatus.PENDING);
+        SellerSubscription.Plan plan = parsePlan(request.getPlan());
+        boolean free = plan == SellerSubscription.Plan.FREE;
+        seller.setAccountStatus(free ? Seller.AccountStatus.ACTIVE : Seller.AccountStatus.PENDING);
         seller.setCreatedBy(createdBy);
         sellerNetworkService.assignCompanyCode(seller);
         seller = sellerRepository.save(seller);
 
-        SellerSubscription.Plan plan = parsePlan(request.getPlan());
         SellerSubscription subscription = new SellerSubscription();
         subscription.setSellerId(seller.getId());
         subscription.setPlan(plan);
         subscription.setAmount(amountFor(plan));
-        subscription.setPaymentStatus(SellerSubscription.PaymentStatus.PENDING);
+        if (free) {
+            subscription.setStartDate(LocalDate.now());
+            subscription.setPaymentStatus(SellerSubscription.PaymentStatus.SUCCESSFUL);
+        } else {
+            subscription.setPaymentStatus(SellerSubscription.PaymentStatus.PENDING);
+        }
         subscriptionRepository.save(subscription);
-
-        return toSellerResponse(seller, true);
+        SellerAdminResponse response = toSellerResponse(seller, true);
+        attachAccountNotice(seller, response, request.getUsername().trim().toLowerCase());
+        return response;
     }
 
     @Transactional
@@ -131,6 +141,14 @@ public class SellerAdminService {
                 && !EMAIL.matcher(request.getEmail().trim()).matches()) {
             throw new BadRequestException("Invalid email format");
         }
+        String nextMobile = request.getMobile().trim();
+        String currentEmail = seller.getEmail() == null ? "" : seller.getEmail().trim();
+        String nextEmail = request.getEmail() == null ? "" : request.getEmail().trim();
+        accountIdentityService.rejectDuplicateContact(
+                nextMobile.equals(seller.getMobile()) ? null : nextMobile,
+                nextEmail.equalsIgnoreCase(currentEmail) ? null : request.getEmail(),
+                seller.getUserId(),
+                seller.getId());
 
         seller.setOwnerName(request.getOwnerName().trim());
         seller.setMobile(request.getMobile().trim());
@@ -259,6 +277,9 @@ public class SellerAdminService {
         sellerRepository.save(seller);
 
         SellerSubscription.Plan plan = parsePlan(planValue);
+        if (plan == SellerSubscription.Plan.FREE) {
+            throw new BadRequestException("Free plan is set by admin only");
+        }
         BigDecimal amount = amountFor(plan);
         SellerPayment.Method method = parseMethod(methodValue == null ? "UPI" : methodValue);
 
@@ -482,13 +503,21 @@ public class SellerAdminService {
         if (request.getMobile() == null || !MOBILE.matcher(request.getMobile().trim()).matches()) {
             throw new BadRequestException("Mobile must be 10 digits");
         }
-        if (sellerRepository.existsByMobile(request.getMobile().trim())) {
-            throw new BadRequestException("A seller with this mobile already exists");
+        String username = request.getUsername() == null ? "" : request.getUsername().trim().toLowerCase();
+        if (!username.matches("^[a-z][a-z0-9._]{2,29}$")) {
+            throw new BadRequestException("Username must start with a letter and be 3 to 30 characters");
+        }
+        if (username.equals(request.getMobile().trim())) {
+            throw new BadRequestException("Username cannot be the mobile number");
+        }
+        if (userRepository.existsByUsername(username)) {
+            throw new BadRequestException("Username already exists. Choose another username.");
         }
         if (request.getEmail() != null && request.getEmail().trim().length() > 0
                 && !EMAIL.matcher(request.getEmail().trim()).matches()) {
             throw new BadRequestException("Invalid email format");
         }
+        accountIdentityService.rejectDuplicateContact(request.getMobile(), request.getEmail(), null, null);
         if (request.getBusinessName() == null || request.getBusinessName().trim().length() < 2) {
             throw new BadRequestException("Business name is required");
         }
@@ -529,7 +558,7 @@ public class SellerAdminService {
         try {
             return SellerSubscription.Plan.valueOf(plan.trim().toUpperCase());
         } catch (IllegalArgumentException ex) {
-            throw new BadRequestException("Plan must be MONTHLY or YEARLY");
+            throw new BadRequestException("Plan must be FREE, MONTHLY or YEARLY");
         }
     }
 
@@ -549,6 +578,9 @@ public class SellerAdminService {
     }
 
     private BigDecimal amountFor(SellerSubscription.Plan plan) {
+        if (plan == SellerSubscription.Plan.FREE) {
+            return BigDecimal.ZERO.setScale(2, BigDecimal.ROUND_HALF_UP);
+        }
         boolean yearly = plan == SellerSubscription.Plan.YEARLY;
         String raw = settingsService.getSetting(yearly ? "planYearlyAmount" : "planMonthlyAmount");
         if (raw != null && !raw.trim().isEmpty()) {
@@ -643,6 +675,9 @@ public class SellerAdminService {
         response.setAccountStatus(seller.getAccountStatus().name());
         User login = linkedLogin(seller);
         response.setLoginActive(login == null ? null : login.getIsActive());
+        if (login != null) {
+            response.setUsername(login.getUsername());
+        }
         response.setDeactivationReason(seller.getDeactivationReason());
         response.setAdminNote(seller.getAdminNote());
         response.setCreatedAt(seller.getCreatedAt());
@@ -698,6 +733,57 @@ public class SellerAdminService {
         response.setUpdatedAt(payment.getUpdatedAt());
         response.setCreatedBy(payment.getCreatedBy());
         return response;
+    }
+
+    private void attachAccountNotice(Seller seller, SellerAdminResponse response, String username) {
+        String mobile = AccountNotice.digits(seller.getMobile());
+        if (!mobile.matches("^[0-9]{10}$")) {
+            return;
+        }
+        User user = userRepository.findFirstByPhoneAndRole(mobile, User.UserRole.seller).orElse(null);
+        if (user == null) {
+            User named = userRepository.findByUsername(username).orElse(null);
+            if (named != null && named.getRole() == User.UserRole.seller) {
+                user = named;
+            }
+        }
+        if (user == null) {
+            if (userRepository.existsByUsername(username)) {
+                throw new BadRequestException("Username already exists. Choose another username.");
+            }
+            user = new User();
+            user.setUsername(username);
+            user.setFullName(seller.getOwnerName());
+            user.setPassword(authService.encodePassword(java.util.UUID.randomUUID().toString() + "Aa1"));
+            user.setMustSetPassword(true);
+            user.setRole(User.UserRole.seller);
+            user.setStatus(User.UserStatus.APPROVED);
+            user.setIsActive(true);
+            user.setEmail(seller.getEmail());
+            user.setPhone(mobile);
+            user.setCreatedAt(LocalDateTime.now());
+            user.setCreatedBy(seller.getCreatedBy());
+            user = userRepository.save(user);
+        }
+        if (seller.getEmail() != null && (user.getEmail() == null || user.getEmail().trim().isEmpty())) {
+            user.setEmail(seller.getEmail());
+            user = userRepository.save(user);
+        }
+        seller.setUserId(user.getId());
+        sellerRepository.save(seller);
+        java.util.Map<String, String> invite = authService.createInvite(user);
+        String resetLink = invite.get("resetLink");
+        String displayName = user.getFullName() != null && user.getFullName().trim().length() > 0
+                ? user.getFullName() : seller.getOwnerName();
+        String message = AccountNotice.message(displayName, user.getUsername(), invite.get("appUrl"), resetLink);
+        String noticeEmail = seller.getEmail() != null && seller.getEmail().trim().length() > 0
+                ? seller.getEmail().trim() : user.getEmail();
+        boolean emailed = emailService.sendAccountDetails(noticeEmail, displayName, user.getUsername(), resetLink);
+        response.setUsername(user.getUsername());
+        response.setInviteLink(resetLink);
+        response.setWhatsappUrl(AccountNotice.whatsappUrl(mobile, message));
+        response.setSmsUrl(AccountNotice.smsUrl(mobile, message));
+        response.setEmailSent(Boolean.valueOf(emailed));
     }
 
     private User linkedLogin(Seller seller) {
@@ -769,12 +855,15 @@ public class SellerAdminService {
         response.setBusinessName(seller != null ? seller.getBusinessName() : null);
         String status = computeSubscriptionStatus(subscription);
         response.setStatus(status);
+        boolean free = subscription != null
+                && subscription.getPlan() == SellerSubscription.Plan.FREE
+                && subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.SUCCESSFUL;
         boolean subscribed = subscription != null
                 && subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.SUCCESSFUL
                 && subscription.getExpiryDate() != null
                 && !subscription.getExpiryDate().isBefore(LocalDate.now());
-        response.setSubscribed(subscribed);
-        response.setCanWork(!subscriptionRequired() || subscribed);
+        response.setSubscribed(subscribed || free);
+        response.setCanWork(!subscriptionRequired() || subscribed || free);
         if (subscription != null) {
             response.setPlan(subscription.getPlan() != null ? subscription.getPlan().name() : null);
             response.setAmount(subscription.getAmount());
@@ -797,7 +886,7 @@ public class SellerAdminService {
                 }
             }
         }
-        if (subscriptionRequired() && !subscribed) {
+        if (subscriptionRequired() && !subscribed && !free) {
             if ("Expired".equals(status)) {
                 response.setReminderMessage("Your subscription has expired. Subscribe again to continue using seller features.");
             } else {
@@ -861,6 +950,9 @@ public class SellerAdminService {
     }
 
     private String subscriptionStatusAsOf(SellerSubscription subscription, LocalDate asOf) {
+        if (isFreePlan(subscription)) {
+            return "Free";
+        }
         if (subscription == null || subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.PENDING
                 || subscription.getExpiryDate() == null) {
             return "Payment Pending";
@@ -875,6 +967,9 @@ public class SellerAdminService {
     }
 
     private String computeSubscriptionStatus(SellerSubscription subscription) {
+        if (isFreePlan(subscription)) {
+            return "Free";
+        }
         if (subscription == null || subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.PENDING
                 || subscription.getExpiryDate() == null) {
             return "Payment Pending";
@@ -891,6 +986,12 @@ public class SellerAdminService {
             return "Expiring Soon";
         }
         return "Active";
+    }
+
+    private boolean isFreePlan(SellerSubscription subscription) {
+        return subscription != null
+                && subscription.getPlan() == SellerSubscription.Plan.FREE
+                && subscription.getPaymentStatus() == SellerSubscription.PaymentStatus.SUCCESSFUL;
     }
 
     private Map<Long, Seller> indexSellers() {

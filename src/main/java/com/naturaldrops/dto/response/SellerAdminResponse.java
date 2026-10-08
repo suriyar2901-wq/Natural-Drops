@@ -28,6 +28,11 @@ public class SellerAdminResponse {
     private String adminNote;
     private LocalDateTime createdAt;
     private String createdBy;
+    private String username;
+    private String inviteLink;
+    private String whatsappUrl;
+    private String smsUrl;
+    private Boolean emailSent;
 
     private Long subscriptionId;
     private String plan;

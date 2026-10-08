@@ -5,6 +5,7 @@ import lombok.Data;
 @Data
 public class CreateSellerRequest {
     private String ownerName;
+    private String username;
     private String mobile;
     private String alternateMobile;
     private String email;

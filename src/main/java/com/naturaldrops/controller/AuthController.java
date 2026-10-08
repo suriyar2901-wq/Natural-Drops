@@ -63,8 +63,7 @@ public class AuthController {
     @PostMapping("/forgot-password")
     public ResponseEntity<ApiResponse<Object>> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
         authService.requestPasswordReset(request);
-        // Always return success message (security best practice - don't reveal if email exists)
-        return ResponseEntity.ok(ApiResponse.success("If an account exists with this email, password reset instructions have been sent", null));
+        return ResponseEntity.ok(ApiResponse.success("Reset password link sent to the email saved on this username", null));
     }
     
     @PostMapping("/reset-password")

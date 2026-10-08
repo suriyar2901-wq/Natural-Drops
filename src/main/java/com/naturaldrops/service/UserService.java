@@ -16,6 +16,7 @@ import java.util.List;
 public class UserService {
     
     private final UserRepository userRepository;
+    private final AccountIdentityService accountIdentityService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     
     public List<User> getAllUsers() {
@@ -42,6 +43,7 @@ public class UserService {
         if (userRepository.existsByUsername(user.getUsername())) {
             throw new IllegalArgumentException("Username already exists");
         }
+        accountIdentityService.rejectDuplicateContact(user.getPhone(), user.getEmail(), null, null);
         
         // Encode password
         user.setPassword(passwordEncoder.encode(user.getPassword()));
@@ -83,6 +85,22 @@ public class UserService {
             user.setRole(userDetails.getRole());
         }
         
+        String nextEmail = userDetails.getEmail();
+        String nextPhone = userDetails.getPhone();
+        String emailToCheck = null;
+        String phoneToCheck = null;
+        if (nextEmail != null && nextEmail.trim().length() > 0
+                && !nextEmail.trim().equalsIgnoreCase(user.getEmail() == null ? "" : user.getEmail().trim())) {
+            emailToCheck = nextEmail.trim();
+        }
+        if (nextPhone != null && nextPhone.trim().length() > 0
+                && !AccountNotice.digits(nextPhone).equals(AccountNotice.digits(user.getPhone()))) {
+            phoneToCheck = nextPhone.trim();
+        }
+        if (emailToCheck != null || phoneToCheck != null) {
+            accountIdentityService.rejectDuplicateContact(phoneToCheck, emailToCheck, id, null);
+        }
+
         // Only update email if provided
         if (userDetails.getEmail() != null) {
             user.setEmail(userDetails.getEmail());

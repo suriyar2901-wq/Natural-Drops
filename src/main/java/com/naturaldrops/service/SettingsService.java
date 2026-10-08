@@ -53,6 +53,27 @@ public class SettingsService {
         return settingsMap;
     }
     
+    public Map<String, String> supportContacts() {
+        Map<String, String> settings = getAllSettings();
+        String phone = firstFilled(settings.get("supportPhone"), settings.get("businessPhone"), settings.get("adminMobile"));
+        String whatsapp = firstFilled(settings.get("supportWhatsapp"), settings.get("whatsappNumber"), phone);
+        String email = firstFilled(settings.get("supportEmail"), settings.get("customerSupportEmail"), settings.get("adminEmail"), settings.get("businessEmail"));
+        Map<String, String> contacts = new HashMap<String, String>();
+        contacts.put("phone", phone);
+        contacts.put("whatsapp", whatsapp);
+        contacts.put("email", email);
+        return contacts;
+    }
+
+    private String firstFilled(String... values) {
+        for (String value : values) {
+            if (value != null && value.trim().length() > 0) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
     public String getSetting(String key) {
         return settingRepository.findBySettingKey(key)
                 .map(Setting::getSettingValue)
