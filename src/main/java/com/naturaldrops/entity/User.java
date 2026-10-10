@@ -53,6 +53,9 @@ public class User {
     
     @Column(name = "date_of_birth")
     private LocalDate dateOfBirth;
+
+    @Column(name = "aadhaar_number", length = 12)
+    private String aadhaarNumber;
     
     @Column(name = "alternate_phone", length = 20)
     private String alternatePhone;

@@ -29,6 +29,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -82,6 +83,7 @@ public class SellerAdminService {
         Seller seller = new Seller();
         seller.setSellerCode(nextSellerCode());
         seller.setOwnerName(request.getOwnerName().trim());
+        applyOwnerIdentity(seller, request.getGender(), request.getDateOfBirth(), request.getAadhaarNumber());
         seller.setMobile(request.getMobile().trim());
         seller.setAlternateMobile(emptyToNull(request.getAlternateMobile()));
         seller.setEmail(emptyToNull(request.getEmail()));
@@ -151,6 +153,7 @@ public class SellerAdminService {
                 seller.getId());
 
         seller.setOwnerName(request.getOwnerName().trim());
+        applyOwnerIdentity(seller, request.getGender(), request.getDateOfBirth(), request.getAadhaarNumber());
         seller.setMobile(request.getMobile().trim());
         seller.setAlternateMobile(emptyToNull(request.getAlternateMobile()));
         seller.setEmail(emptyToNull(request.getEmail()));
@@ -163,6 +166,13 @@ public class SellerAdminService {
             seller.setAdminNote(request.getChangeNote().trim());
         }
         sellerRepository.save(seller);
+        User login = linkedLogin(seller);
+        if (login != null) {
+            login.setGender(profileGenderCode(seller.getGender()));
+            login.setDateOfBirth(seller.getDateOfBirth());
+            login.setAadhaarNumber(seller.getAadhaarNumber());
+            userRepository.save(login);
+        }
         return toSellerResponse(seller, true);
     }
 
@@ -534,6 +544,33 @@ public class SellerAdminService {
             throw new BadRequestException("Pincode must be 6 digits");
         }
         parsePlan(request.getPlan());
+        applyOwnerIdentity(new Seller(), request.getGender(), request.getDateOfBirth(), request.getAadhaarNumber());
+    }
+
+    private void applyOwnerIdentity(Seller seller, String gender, String dateOfBirth, String aadhaarNumber) {
+        String normalizedGender = gender == null ? "" : gender.trim();
+        if (!normalizedGender.equals("Male") && !normalizedGender.equals("Female") && !normalizedGender.equals("Other")) {
+            throw new BadRequestException("Gender must be Male, Female or Other");
+        }
+        if (dateOfBirth == null || dateOfBirth.trim().isEmpty()) {
+            throw new BadRequestException("Date of birth is required");
+        }
+        LocalDate birthDate;
+        try {
+            birthDate = LocalDate.parse(dateOfBirth.trim());
+        } catch (DateTimeParseException ex) {
+            throw new BadRequestException("Date of birth must be a valid date");
+        }
+        if (!birthDate.isBefore(LocalDate.now())) {
+            throw new BadRequestException("Date of birth must be in the past");
+        }
+        String aadhaar = aadhaarNumber == null ? "" : aadhaarNumber.replaceAll("\\s", "");
+        if (!aadhaar.matches("^[0-9]{12}$")) {
+            throw new BadRequestException("Aadhaar number must be 12 digits");
+        }
+        seller.setGender(normalizedGender);
+        seller.setDateOfBirth(birthDate);
+        seller.setAadhaarNumber(aadhaar);
     }
 
     private Seller findSeller(Long id) {
@@ -664,6 +701,9 @@ public class SellerAdminService {
         response.setSellerCode(seller.getSellerCode());
         response.setCompanyCode(seller.getCompanyCode());
         response.setOwnerName(seller.getOwnerName());
+        response.setGender(seller.getGender());
+        response.setDateOfBirth(seller.getDateOfBirth());
+        response.setAadhaarNumber(seller.getAadhaarNumber());
         response.setMobile(seller.getMobile());
         response.setAlternateMobile(seller.getAlternateMobile());
         response.setEmail(seller.getEmail());
@@ -735,6 +775,23 @@ public class SellerAdminService {
         return response;
     }
 
+    private String profileGenderCode(String gender) {
+        if (gender == null) {
+            return null;
+        }
+        String value = gender.trim().toUpperCase();
+        if ("FEMALE".equals(value)) {
+            return "FEMALE";
+        }
+        if ("OTHER".equals(value)) {
+            return "OTHER";
+        }
+        if ("MALE".equals(value)) {
+            return "MALE";
+        }
+        return null;
+    }
+
     private void attachAccountNotice(Seller seller, SellerAdminResponse response, String username) {
         String mobile = AccountNotice.digits(seller.getMobile());
         if (!mobile.matches("^[0-9]{10}$")) {
@@ -765,6 +822,10 @@ public class SellerAdminService {
             user.setCreatedBy(seller.getCreatedBy());
             user = userRepository.save(user);
         }
+        user.setGender(profileGenderCode(seller.getGender()));
+        user.setDateOfBirth(seller.getDateOfBirth());
+        user.setAadhaarNumber(seller.getAadhaarNumber());
+        user = userRepository.save(user);
         if (seller.getEmail() != null && (user.getEmail() == null || user.getEmail().trim().isEmpty())) {
             user.setEmail(seller.getEmail());
             user = userRepository.save(user);

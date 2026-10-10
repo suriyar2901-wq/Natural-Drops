@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -26,6 +27,15 @@ public class Seller {
 
     @Column(name = "owner_name", nullable = false, length = 100)
     private String ownerName;
+
+    @Column(length = 20)
+    private String gender;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Column(name = "aadhaar_number", length = 12)
+    private String aadhaarNumber;
 
     @Column(nullable = false, length = 20)
     private String mobile;

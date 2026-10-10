@@ -98,7 +98,7 @@ public class SellerNetworkService {
     @Transactional
     public Seller createSellerAccount(User user, String companyName) {
         if (companyName == null || companyName.trim().length() < 2) {
-            throw new BadRequestException("Company name is required for a seller account");
+            throw new BadRequestException("Shop name is required for a seller account");
         }
         Seller existing = findSellerForUser(user);
         if (existing != null) {
@@ -107,6 +107,15 @@ public class SellerNetworkService {
                 sellerRepository.save(existing);
             }
             existing.setUserId(user.getId());
+            if (sellerGenderLabel(user.getGender()) != null) {
+                existing.setGender(sellerGenderLabel(user.getGender()));
+            }
+            if (user.getDateOfBirth() != null) {
+                existing.setDateOfBirth(user.getDateOfBirth());
+            }
+            if (user.getAadhaarNumber() != null) {
+                existing.setAadhaarNumber(user.getAadhaarNumber());
+            }
             return sellerRepository.save(existing);
         }
         Seller seller = new Seller();
@@ -116,6 +125,9 @@ public class SellerNetworkService {
         seller.setMobile(user.getPhone());
         seller.setEmail(user.getEmail());
         seller.setBusinessName(companyName.trim());
+        seller.setGender(sellerGenderLabel(user.getGender()));
+        seller.setDateOfBirth(user.getDateOfBirth());
+        seller.setAadhaarNumber(user.getAadhaarNumber());
         String address = user.getAddress() != null && user.getAddress().trim().length() > 0
                 ? user.getAddress() : "Not provided";
         seller.setBusinessAddress(address);
@@ -340,6 +352,22 @@ public class SellerNetworkService {
             builder.append(".");
         }
         return builder.toString().trim();
+    }
+
+    private String sellerGenderLabel(String gender) {
+        if (gender == null) {
+            return null;
+        }
+        if ("MALE".equalsIgnoreCase(gender) || "Male".equalsIgnoreCase(gender)) {
+            return "Male";
+        }
+        if ("FEMALE".equalsIgnoreCase(gender) || "Female".equalsIgnoreCase(gender)) {
+            return "Female";
+        }
+        if ("OTHER".equalsIgnoreCase(gender) || "Other".equalsIgnoreCase(gender)) {
+            return "Other";
+        }
+        return null;
     }
 
     private String sanitizePrefix(String companyName) {

@@ -71,6 +71,7 @@ public class AuthService {
         
         User user = new User();
         user.setUsername(request.getUsername());
+        user.setFullName(request.getFullName().trim());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(request.getRole());
         user.setEmail(request.getEmail());
@@ -79,6 +80,13 @@ public class AuthService {
         // New fields
         user.setGender(request.getGender());
         user.setDateOfBirth(request.getDateOfBirth());
+        if (request.getRole() == User.UserRole.seller) {
+            String aadhaar = request.getAadhaarNumber() == null ? "" : request.getAadhaarNumber().replaceAll("\\s", "");
+            if (!aadhaar.matches("^[0-9]{12}$")) {
+                throw new BadRequestException("Aadhaar number must be 12 digits");
+            }
+            user.setAadhaarNumber(aadhaar);
+        }
         user.setAlternatePhone(request.getAlternatePhone());
         user.setProfilePhoto(request.getProfilePhoto());
         
@@ -124,7 +132,7 @@ public class AuthService {
             user.setLinkedSellerId(sellerNetworkService.findByAnyCode(request.getCompanyCode()).getId());
         } else if (request.getRole() == User.UserRole.seller) {
             if (request.getCompanyName() == null || request.getCompanyName().trim().length() < 2) {
-                throw new BadRequestException("Company name is required to create a seller account");
+                throw new BadRequestException("Shop name is required to create a seller account");
             }
         }
         

@@ -505,6 +505,10 @@ public class ShopService {
         if (incoming.getQrData() != null) {
             profile.setQrData(incoming.getQrData());
         }
+        if (incoming.getUpiId() != null) {
+            String upiId = incoming.getUpiId().trim();
+            profile.setUpiId(upiId.isEmpty() ? null : upiId);
+        }
         if (incoming.getOpenTime() != null || incoming.getCloseTime() != null) {
             String openTime = normalizeClock(incoming.getOpenTime());
             String closeTime = normalizeClock(incoming.getCloseTime());

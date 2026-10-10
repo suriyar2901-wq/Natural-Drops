@@ -37,6 +37,9 @@ public class ShopProfile {
     @Column(name = "qr_data", columnDefinition = "TEXT")
     private String qrData;
 
+    @Column(name = "upi_id", length = 100)
+    private String upiId;
+
     @Column(name = "open_time", length = 5)
     private String openTime;
 

@@ -14,6 +14,9 @@ public class SellerAdminResponse {
     private String sellerCode;
     private String companyCode;
     private String ownerName;
+    private String gender;
+    private LocalDate dateOfBirth;
+    private String aadhaarNumber;
     private String mobile;
     private String alternateMobile;
     private String email;

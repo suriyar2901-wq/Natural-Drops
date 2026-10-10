@@ -1,7 +1,10 @@
 package com.naturaldrops.service;
 
+import com.naturaldrops.entity.Seller;
 import com.naturaldrops.entity.User;
+import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
+import com.naturaldrops.repository.SellerRepository;
 import com.naturaldrops.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -16,6 +19,7 @@ import java.util.List;
 public class UserService {
     
     private final UserRepository userRepository;
+    private final SellerRepository sellerRepository;
     private final AccountIdentityService accountIdentityService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     
@@ -124,6 +128,17 @@ public class UserService {
         if (userDetails.getDateOfBirth() != null) {
             user.setDateOfBirth(userDetails.getDateOfBirth());
         }
+
+        if (userDetails.getAadhaarNumber() != null) {
+            String aadhaar = userDetails.getAadhaarNumber().replaceAll("\\s", "");
+            if (aadhaar.isEmpty()) {
+                user.setAadhaarNumber(null);
+            } else if (!aadhaar.matches("^[0-9]{12}$")) {
+                throw new BadRequestException("Aadhaar number must be 12 digits");
+            } else {
+                user.setAadhaarNumber(aadhaar);
+            }
+        }
         
         if (userDetails.getAlternatePhone() != null) {
             user.setAlternatePhone(userDetails.getAlternatePhone().isEmpty() ? null : userDetails.getAlternatePhone());
@@ -170,8 +185,36 @@ public class UserService {
             }
             user.setIsActive(userDetails.getIsActive());
         }
-        
-        return userRepository.save(user);
+
+        User saved = userRepository.save(user);
+        if (saved.getRole() == User.UserRole.seller) {
+            sellerRepository.findByUserId(saved.getId()).ifPresent(seller -> syncSellerIdentity(seller, saved));
+        }
+        return saved;
+    }
+
+    private void syncSellerIdentity(Seller seller, User user) {
+        if (user.getGender() != null && user.getGender().trim().length() > 0) {
+            seller.setGender(profileGenderLabel(user.getGender()));
+        }
+        if (user.getDateOfBirth() != null) {
+            seller.setDateOfBirth(user.getDateOfBirth());
+        }
+        if (user.getAadhaarNumber() != null) {
+            seller.setAadhaarNumber(user.getAadhaarNumber());
+        }
+        sellerRepository.save(seller);
+    }
+
+    private String profileGenderLabel(String gender) {
+        String value = gender.trim().toUpperCase();
+        if ("FEMALE".equals(value)) {
+            return "Female";
+        }
+        if ("OTHER".equals(value)) {
+            return "Other";
+        }
+        return "Male";
     }
 
     @Transactional
@@ -184,6 +227,7 @@ public class UserService {
             safe.setPhone(userDetails.getPhone());
             safe.setGender(userDetails.getGender());
             safe.setDateOfBirth(userDetails.getDateOfBirth());
+            safe.setAadhaarNumber(userDetails.getAadhaarNumber());
             safe.setAlternatePhone(userDetails.getAlternatePhone());
             safe.setProfilePhoto(userDetails.getProfilePhoto());
             safe.setHouseDoorNo(userDetails.getHouseDoorNo());
