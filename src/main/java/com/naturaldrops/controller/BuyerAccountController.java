@@ -36,6 +36,15 @@ public class BuyerAccountController {
         ));
     }
 
+    @PostMapping("/cans-ready")
+    public ResponseEntity<ApiResponse<Void>> cansReady(
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User user = requireBuyer(request);
+        shopService.buyerCansReady(user.getId(), user.getPhone(), body);
+        return ResponseEntity.ok(ApiResponse.success("Seller notified", null));
+    }
+
     private User requireBuyer(HttpServletRequest request) {
         User currentUser = (User) request.getAttribute("currentUser");
         if (currentUser == null) {

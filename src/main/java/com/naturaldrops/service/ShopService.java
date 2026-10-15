@@ -552,7 +552,6 @@ public class ShopService {
         ShopProfile profile = customer != null
                 ? shopProfileRepository.findBySellerUserId(customer.getSellerUserId()).orElse(null)
                 : null;
-        result.put("sellerQr", profile != null ? profile.getQrData() : null);
         result.put("sellerBusiness", profile != null ? profile.getBusinessName() : "Natural Drops");
         Seller seller = null;
         User buyer = userRepository.findById(buyerUserId).orElse(null);
@@ -574,6 +573,11 @@ public class ShopService {
         if (profile == null && seller != null && seller.getUserId() != null) {
             profile = shopProfileRepository.findBySellerUserId(seller.getUserId()).orElse(null);
         }
+        result.put("sellerQr", profile != null ? profile.getQrData() : null);
+        result.put("sellerUpi", profile != null ? profile.getUpiId() : null);
+        if (profile != null && profile.getBusinessName() != null) {
+            result.put("sellerBusiness", profile.getBusinessName());
+        }
         putShopHours(result, profile);
         return result;
     }
@@ -585,7 +589,78 @@ public class ShopService {
         if (customer == null) {
             throw new ResourceNotFoundException("No shop account is linked to this buyer yet");
         }
-        return recordPayment(customer.getSellerUserId(), customer.getId(), body, "buyer-claim");
+        if (body == null || body.get("orderId") == null) {
+            throw new BadRequestException("Select the unpaid bill you are paying");
+        }
+        BigDecimal amount = parseAmount(body.get("amount"));
+        Long orderId = toLong(body.get("orderId"));
+        orderService.applyBuyerBillPayment(buyerUserId, orderId, amount);
+        String method = body.get("method") == null ? "UPI" : String.valueOf(body.get("method")).trim().toUpperCase();
+        if (method.isEmpty()) {
+            method = "UPI";
+        }
+        BigDecimal outstanding = customer.getMoney() == null ? BigDecimal.ZERO : customer.getMoney();
+        if (outstanding.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal reduce = amount.compareTo(outstanding) > 0 ? outstanding : amount;
+            customer.setMoney(outstanding.subtract(reduce));
+            customerRepository.save(customer);
+        }
+        saveLedger(customer.getId(), LedgerEvent.Kind.RECEIPT, amount, method, "ORD-" + orderId, "buyer-claim");
+        User buyer = userRepository.findById(buyerUserId).orElse(null);
+        String name = buyer != null && buyer.getFullName() != null && !buyer.getFullName().trim().isEmpty()
+                ? buyer.getFullName().trim()
+                : (buyer != null ? buyer.getUsername() : "Buyer");
+        Long sellerUserId = customer.getSellerUserId() != null
+                ? customer.getSellerUserId()
+                : sellerNetworkService.sellerUserIdForBuyer(buyerUserId);
+        sellerNetworkService.postInboxMessage(
+                sellerUserId,
+                buyerUserId,
+                "Payment received",
+                name + " paid " + amount.setScale(2, BigDecimal.ROUND_HALF_UP)
+                        + " for order #" + orderId + " by " + method + "."
+        );
+        return customer;
+    }
+
+    @Transactional
+    public void buyerCansReady(Long buyerUserId, String phone, Map<String, Object> body) {
+        Map<String, Object> summary = buyerSummary(buyerUserId, phone);
+        ShopCustomer customer = (ShopCustomer) summary.get("customer");
+        int holding = customer != null && customer.getEmptyCans() != null ? customer.getEmptyCans() : 0;
+        if (holding < 1) {
+            throw new BadRequestException("You have no empty cans to return");
+        }
+        int quantity = holding;
+        if (body != null && body.get("quantity") != null && !String.valueOf(body.get("quantity")).trim().isEmpty()) {
+            try {
+                quantity = Integer.parseInt(String.valueOf(body.get("quantity")).trim());
+            } catch (NumberFormatException ex) {
+                throw new BadRequestException("Enter how many cans are ready");
+            }
+        }
+        if (quantity < 1 || quantity > holding) {
+            throw new BadRequestException("You can mark only the cans you still have, up to " + holding);
+        }
+        User buyer = userRepository.findById(buyerUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Buyer not found"));
+        String name = buyer.getFullName() != null && !buyer.getFullName().trim().isEmpty()
+                ? buyer.getFullName().trim()
+                : buyer.getUsername();
+        String address = buyer.getAddress() != null && !buyer.getAddress().trim().isEmpty()
+                ? buyer.getAddress().trim()
+                : "the delivery address";
+        Long sellerUserId = customer != null ? customer.getSellerUserId() : null;
+        if (sellerUserId == null) {
+            sellerUserId = sellerNetworkService.sellerUserIdForBuyer(buyerUserId);
+        }
+        sellerNetworkService.postInboxMessage(
+                sellerUserId,
+                buyerUserId,
+                "Empty cans ready",
+                name + " has " + quantity + " empty can" + (quantity == 1 ? "" : "s")
+                        + " ready for pickup at " + address + "."
+        );
     }
 
     private void putShopHours(Map<String, Object> result, ShopProfile profile) {

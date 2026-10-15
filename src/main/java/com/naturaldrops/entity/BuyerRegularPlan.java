@@ -45,6 +45,10 @@ public class BuyerRegularPlan {
     @Column(name = "last_created_for")
     private LocalDate lastCreatedFor;
 
+    /** Comma-separated yyyy-MM-dd dates the buyer skipped. */
+    @Column(name = "skip_dates", length = 40)
+    private String skipDates;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 

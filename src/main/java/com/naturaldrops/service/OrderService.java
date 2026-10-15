@@ -11,6 +11,7 @@ import com.naturaldrops.entity.ShopCustomer;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
+import com.naturaldrops.exception.UnauthorizedException;
 import com.naturaldrops.repository.CanEventRepository;
 import com.naturaldrops.repository.OrderRepository;
 import com.naturaldrops.repository.OrderStatusHistoryRepository;
@@ -667,6 +668,154 @@ public class OrderService {
         }
         
         return updatedOrder;
+    }
+
+    @Transactional
+    public Order buyerUpdatePending(User buyer, Long id, UpdateOrderRequest request) {
+        Order order = ownedPendingOrder(buyer, id);
+        if (request != null) {
+            request.setUpdatedBy(buyer.getUsername());
+        }
+        Order saved = updateOrder(id, request);
+        String name = buyerName(buyer);
+        sellerNetworkService.postInboxMessage(
+                order.getSellerUserId(),
+                buyer.getId(),
+                "Order changed",
+                name + " changed the quantity on order #" + id + "."
+        );
+        return saved;
+    }
+
+    @Transactional
+    public Order buyerCancelPending(User buyer, Long id) {
+        Order order = ownedPendingOrder(buyer, id);
+        Order.OrderStatus oldStatus = order.getStatus();
+        order.setStatus(Order.OrderStatus.canceled);
+        order.setStatusUpdatedAt(LocalDateTime.now());
+        Order saved = orderRepository.save(order);
+        recordStatusChange(id, oldStatus, Order.OrderStatus.canceled, buyer.getUsername(), "Buyer canceled the pending order");
+        sellerNetworkService.postInboxMessage(
+                order.getSellerUserId(),
+                buyer.getId(),
+                "Order canceled",
+                buyerName(buyer) + " canceled pending order #" + id + "."
+        );
+        return saved;
+    }
+
+    public void assertRegularDeliverySkippable(Long buyerId, LocalDate date) {
+        for (Order order : buyerOrdersOn(buyerId, date)) {
+            if (order.getStatus() == Order.OrderStatus.confirmed
+                    || order.getStatus() == Order.OrderStatus.processing
+                    || order.getStatus() == Order.OrderStatus.delivered) {
+                throw new BadRequestException("A confirmed delivery on " + date + " cannot be skipped");
+            }
+        }
+    }
+
+    public boolean hasActiveDeliveryOn(Long buyerId, LocalDate date) {
+        for (Order order : buyerOrdersOn(buyerId, date)) {
+            if (order.getStatus() != Order.OrderStatus.canceled) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Transactional
+    public void cancelPendingRegularOn(Long buyerId, LocalDate date) {
+        for (Order order : buyerOrdersOn(buyerId, date)) {
+            if (order.getStatus() != Order.OrderStatus.pending) {
+                continue;
+            }
+            String notes = order.getBillingNotes() == null ? "" : order.getBillingNotes().toLowerCase();
+            if (!notes.contains("regular")) {
+                continue;
+            }
+            Order.OrderStatus oldStatus = order.getStatus();
+            order.setStatus(Order.OrderStatus.canceled);
+            order.setStatusUpdatedAt(LocalDateTime.now());
+            orderRepository.save(order);
+            recordStatusChange(order.getId(), oldStatus, Order.OrderStatus.canceled, "buyer", "Skipped regular delivery");
+        }
+    }
+
+    @Transactional
+    public Order applyBuyerBillPayment(Long buyerUserId, Long orderId, BigDecimal amount) {
+        Order order = getOrderById(orderId);
+        if (buyerUserId == null || !buyerUserId.equals(order.getBuyerId())) {
+            throw new UnauthorizedException("You can pay only your own order");
+        }
+        if (order.getStatus() == Order.OrderStatus.canceled) {
+            throw new BadRequestException("A canceled order cannot be paid");
+        }
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Enter a payment amount");
+        }
+        BigDecimal total = order.getTotal() == null ? BigDecimal.ZERO : order.getTotal();
+        BigDecimal already = amountAlreadyPaid(order, total);
+        BigDecimal balance = total.subtract(already);
+        if (balance.compareTo(BigDecimal.ZERO) < 0) {
+            balance = BigDecimal.ZERO;
+        }
+        if (amount.compareTo(balance) > 0) {
+            throw new BadRequestException("Amount is more than the unpaid balance");
+        }
+        BigDecimal paid = already.add(amount);
+        if (paid.compareTo(total) >= 0) {
+            order.setPaymentStatus(Order.PaymentStatus.PAID);
+            order.setFinalBillAmount(total);
+        } else {
+            order.setPaymentStatus(Order.PaymentStatus.PARTIALLY_PAID);
+            order.setFinalBillAmount(paid);
+        }
+        return orderRepository.save(order);
+    }
+
+    private Order ownedPendingOrder(User buyer, Long id) {
+        if (buyer == null) {
+            throw new UnauthorizedException("Login required");
+        }
+        Order order = getOrderById(id);
+        if (order.getBuyerId() == null || !order.getBuyerId().equals(buyer.getId())) {
+            throw new UnauthorizedException("You can change only your own order");
+        }
+        if (order.getStatus() != Order.OrderStatus.pending) {
+            throw new BadRequestException("Only a pending order can be changed");
+        }
+        return order;
+    }
+
+    private List<Order> buyerOrdersOn(Long buyerId, LocalDate date) {
+        if (buyerId == null || date == null) {
+            return java.util.Collections.emptyList();
+        }
+        List<Order> matches = new java.util.ArrayList<Order>();
+        for (Order order : orderRepository.findByBuyerIdOrderByOrderDateDesc(buyerId)) {
+            if (date.equals(order.getScheduledDeliveryDate())) {
+                matches.add(order);
+            }
+        }
+        return matches;
+    }
+
+    private BigDecimal amountAlreadyPaid(Order order, BigDecimal total) {
+        if (order.getPaymentStatus() == Order.PaymentStatus.PAID) {
+            return total;
+        }
+        if (order.getPaymentStatus() == Order.PaymentStatus.PARTIALLY_PAID) {
+            BigDecimal billed = order.getFinalBillAmount() == null ? BigDecimal.ZERO : order.getFinalBillAmount();
+            return billed.compareTo(total) > 0 ? total : billed;
+        }
+        return BigDecimal.ZERO;
+    }
+
+    private String buyerName(User buyer) {
+        if (buyer.getFullName() != null && !buyer.getFullName().trim().isEmpty()) {
+            return buyer.getFullName().trim();
+        }
+        return buyer.getUsername();
     }
     
     private void recordStatusChange(Long orderId, Order.OrderStatus oldStatus, Order.OrderStatus newStatus, 

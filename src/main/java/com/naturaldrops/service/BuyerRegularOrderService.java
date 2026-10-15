@@ -92,6 +92,43 @@ public class BuyerRegularOrderService {
         return saved;
     }
 
+    @Transactional
+    public BuyerRegularPlan skipDates(User user, Object rawDates) {
+        requireBuyer(user);
+        BuyerRegularPlan plan = planRepository.findByBuyerIdWithItems(user.getId())
+                .orElseThrow(() -> new BadRequestException("Set a regular order first"));
+        if (plan.isPaused()) {
+            throw new BadRequestException("Resume the regular order before skipping days");
+        }
+        List<LocalDate> dates = readSkipDates(rawDates);
+        LocalDate today = LocalDate.now();
+        LocalDate latest = today.plusDays(21);
+        for (LocalDate date : dates) {
+            if (date.isBefore(today) || date.isAfter(latest)) {
+                throw new BadRequestException("Choose today or a day within the next 3 weeks");
+            }
+            if (!daySelected(plan.getWeekDays(), String.valueOf(date.getDayOfWeek().getValue() % 7))) {
+                throw new BadRequestException(date + " is not one of your regular delivery days");
+            }
+            orderService.assertRegularDeliverySkippable(user.getId(), date);
+        }
+        String previous = plan.getSkipDates();
+        plan.setSkipDates(joinDates(dates));
+        plan.setUpdatedAt(LocalDateTime.now());
+        for (LocalDate removed : removedDates(previous, dates)) {
+            if (removed.equals(plan.getLastCreatedFor()) && !orderService.hasActiveDeliveryOn(user.getId(), removed)) {
+                plan.setLastCreatedFor(null);
+            }
+        }
+        BuyerRegularPlan saved = planRepository.save(plan);
+        for (LocalDate date : dates) {
+            orderService.cancelPendingRegularOn(user.getId(), date);
+        }
+        String label = dates.isEmpty() ? "cleared the skipped days." : " will skip delivery on " + joinDates(dates) + ".";
+        notifySeller(user, saved, dates.isEmpty() ? "Skip cleared" : "Delivery skipped", label);
+        return saved;
+    }
+
     private void notifySeller(User buyer, BuyerRegularPlan plan, String title, String action) {
         Long sellerUserId = plan.getSellerUserId() != null
                 ? plan.getSellerUserId()
@@ -158,6 +195,9 @@ public class BuyerRegularOrderService {
 
     public boolean dueOn(BuyerRegularPlan plan, LocalDate deliveryDate) {
         if (plan == null || plan.isPaused() || deliveryDate == null) {
+            return false;
+        }
+        if (dateSkipped(plan.getSkipDates(), deliveryDate)) {
             return false;
         }
         if (deliveryDate.equals(plan.getLastCreatedFor())) {
@@ -285,6 +325,81 @@ public class BuyerRegularOrderService {
             throw new BadRequestException("Add at least one item");
         }
         return items;
+    }
+
+    private List<LocalDate> readSkipDates(Object raw) {
+        List<String> tokens = new ArrayList<String>();
+        if (raw instanceof List) {
+            for (Object entry : (List<?>) raw) {
+                String token = stringValue(entry).trim();
+                if (!token.isEmpty()) {
+                    tokens.add(token);
+                }
+            }
+        } else if (raw != null) {
+            for (String part : stringValue(raw).split(",")) {
+                if (!part.trim().isEmpty()) {
+                    tokens.add(part.trim());
+                }
+            }
+        }
+        if (tokens.size() > 2) {
+            throw new BadRequestException("You can skip only 1 or 2 days");
+        }
+        List<LocalDate> dates = new ArrayList<LocalDate>();
+        for (String token : tokens) {
+            try {
+                LocalDate date = LocalDate.parse(token);
+                if (!dates.contains(date)) {
+                    dates.add(date);
+                }
+            } catch (RuntimeException ex) {
+                throw new BadRequestException("Use a valid date");
+            }
+        }
+        return dates;
+    }
+
+    private String joinDates(List<LocalDate> dates) {
+        StringBuilder builder = new StringBuilder();
+        for (LocalDate date : dates) {
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(date.toString());
+        }
+        return builder.length() == 0 ? null : builder.toString();
+    }
+
+    private List<LocalDate> removedDates(String previous, List<LocalDate> next) {
+        List<LocalDate> removed = new ArrayList<LocalDate>();
+        if (previous == null || previous.trim().isEmpty()) {
+            return removed;
+        }
+        for (String part : previous.split(",")) {
+            try {
+                LocalDate date = LocalDate.parse(part.trim());
+                if (!next.contains(date)) {
+                    removed.add(date);
+                }
+            } catch (RuntimeException ignored) {
+                // Ignore a stored date that is no longer valid.
+            }
+        }
+        return removed;
+    }
+
+    private boolean dateSkipped(String skipDates, LocalDate date) {
+        if (skipDates == null || date == null) {
+            return false;
+        }
+        String token = date.toString();
+        for (String part : skipDates.split(",")) {
+            if (token.equals(part.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean daySelected(String weekDays, String dayToken) {

@@ -171,6 +171,23 @@ public class OrderController {
         Order order = orderService.updateOrder(id, request);
         return ResponseEntity.ok(ApiResponse.success("Order updated successfully", order));
     }
+
+    @PutMapping("/{id}/buyer-items")
+    public ResponseEntity<ApiResponse<Order>> buyerUpdatePending(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateOrderRequest request,
+            HttpServletRequest httpRequest) {
+        Order order = orderService.buyerUpdatePending(currentUser(httpRequest), id, request);
+        return ResponseEntity.ok(ApiResponse.success("Order updated", order));
+    }
+
+    @PostMapping("/{id}/buyer-cancel")
+    public ResponseEntity<ApiResponse<Order>> buyerCancelPending(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
+        Order order = orderService.buyerCancelPending(currentUser(httpRequest), id);
+        return ResponseEntity.ok(ApiResponse.success("Order canceled", order));
+    }
     
     @PutMapping("/{id}/status")
     public ResponseEntity<ApiResponse<Order>> updateOrderStatus(@PathVariable Long id, @RequestParam Order.OrderStatus status) {

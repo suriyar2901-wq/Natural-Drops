@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
 import java.util.Map;
-
+ 
 @RestController
 @RequestMapping("/api/buyer/regular-order")
 public class BuyerRegularOrderController {
@@ -47,6 +47,17 @@ public class BuyerRegularOrderController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Regular order paused",
                 buyerRegularOrderService.setPaused(currentUser(request), true)
+        ));
+    }
+
+    @PostMapping("/skip")
+    public ResponseEntity<ApiResponse<BuyerRegularPlan>> skip(
+            HttpServletRequest request,
+            @RequestBody Map<String, Object> body
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Skipped days saved",
+                buyerRegularOrderService.skipDates(currentUser(request), body.get("dates"))
         ));
     }
 
