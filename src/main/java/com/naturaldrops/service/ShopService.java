@@ -582,8 +582,22 @@ public class ShopService {
         return result;
     }
 
+    @Transactional(readOnly = true)
+    public void assertBuyerCanPayOrder(Long buyerUserId, Long orderId, BigDecimal amount) {
+        Map<String, Object> summary = buyerSummary(buyerUserId, null);
+        if (summary.get("customer") == null) {
+            throw new ResourceNotFoundException("No shop account is linked to this buyer yet");
+        }
+        orderService.assertBuyerBillPayable(buyerUserId, orderId, amount);
+    }
+
     @Transactional
     public ShopCustomer buyerClaimPayment(Long buyerUserId, String phone, Map<String, Object> body) {
+        return applyConfirmedBuyerPayment(buyerUserId, phone, body);
+    }
+
+    @Transactional
+    public ShopCustomer applyConfirmedBuyerPayment(Long buyerUserId, String phone, Map<String, Object> body) {
         Map<String, Object> summary = buyerSummary(buyerUserId, phone);
         ShopCustomer customer = (ShopCustomer) summary.get("customer");
         if (customer == null) {

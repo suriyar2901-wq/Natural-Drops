@@ -741,8 +741,8 @@ public class OrderService {
         }
     }
 
-    @Transactional
-    public Order applyBuyerBillPayment(Long buyerUserId, Long orderId, BigDecimal amount) {
+    @Transactional(readOnly = true)
+    public void assertBuyerBillPayable(Long buyerUserId, Long orderId, BigDecimal amount) {
         Order order = getOrderById(orderId);
         if (buyerUserId == null || !buyerUserId.equals(order.getBuyerId())) {
             throw new UnauthorizedException("You can pay only your own order");
@@ -762,6 +762,14 @@ public class OrderService {
         if (amount.compareTo(balance) > 0) {
             throw new BadRequestException("Amount is more than the unpaid balance");
         }
+    }
+
+    @Transactional
+    public Order applyBuyerBillPayment(Long buyerUserId, Long orderId, BigDecimal amount) {
+        assertBuyerBillPayable(buyerUserId, orderId, amount);
+        Order order = getOrderById(orderId);
+        BigDecimal total = order.getTotal() == null ? BigDecimal.ZERO : order.getTotal();
+        BigDecimal already = amountAlreadyPaid(order, total);
         BigDecimal paid = already.add(amount);
         if (paid.compareTo(total) >= 0) {
             order.setPaymentStatus(Order.PaymentStatus.PAID);
