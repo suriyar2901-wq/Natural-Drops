@@ -37,6 +37,7 @@ public class PaymentClaimService {
     private final SellerAdminService sellerAdminService;
     private final ShopService shopService;
     private final SellerNetworkService sellerNetworkService;
+    private final PushNotificationService pushNotificationService;
 
     public Map<String, String> platformPaymentDetails() {
         Map<String, String> settings = settingsService.getAllSettings();
@@ -123,6 +124,9 @@ public class PaymentClaimService {
             method = "UPI";
         }
         String reference = body.get("upiReference") == null ? null : String.valueOf(body.get("upiReference")).trim();
+        if ("UPI".equals(method) && (reference == null || reference.length() < 6)) {
+            throw new BadRequestException("Enter the UPI transaction / UTR number from your payment app");
+        }
         Long sellerUserId = sellerNetworkService.sellerUserIdForBuyer(buyer.getId());
         Seller seller = null;
         if (buyer.getLinkedSellerId() != null) {
@@ -141,17 +145,33 @@ public class PaymentClaimService {
         String name = buyer.getFullName() != null && !buyer.getFullName().trim().isEmpty()
                 ? buyer.getFullName().trim()
                 : buyer.getUsername();
-        claim.setNote(name + " paid " + amount.setScale(2, BigDecimal.ROUND_HALF_UP) + " for order #" + orderId);
+        String amountText = amount.setScale(2, BigDecimal.ROUND_HALF_UP).toPlainString();
+        claim.setNote(name + " paid ₹" + amountText + " for order #" + orderId
+                + (reference != null && reference.length() > 0 ? " · UTR " + reference : ""));
         PaymentClaim saved = claimRepository.save(claim);
+        String inboxBody = name + " paid ₹" + amountText
+                + " for order #" + orderId + " by " + method
+                + (reference != null && reference.length() > 0 ? ". UTR " + reference : "")
+                + ". Open Buyer bill payments and confirm after you see it in your UPI app.";
         sellerNetworkService.postInboxMessage(
                 sellerUserId,
                 buyer.getId(),
-                "Payment waiting",
-                name + " paid " + amount.setScale(2, BigDecimal.ROUND_HALF_UP)
-                        + " for order #" + orderId + " by " + method
-                        + (reference != null && reference.length() > 0 ? ". Ref " + reference : "")
-                        + ". Confirm after you see it in your UPI app."
+                "Bill payment waiting",
+                inboxBody
         );
+        if (sellerUserId != null) {
+            Map<String, Object> pushData = new HashMap<String, Object>();
+            pushData.put("type", "ORDER_BILL_CLAIM");
+            pushData.put("claimId", saved.getId());
+            pushData.put("orderId", orderId);
+            pushNotificationService.sendNotificationToUser(
+                    sellerUserId,
+                    "Bill payment waiting",
+                    name + " paid ₹" + amountText + " for order #" + orderId
+                            + (reference != null && reference.length() > 0 ? " · UTR " + reference : ""),
+                    pushData
+            );
+        }
         return saved;
     }
 

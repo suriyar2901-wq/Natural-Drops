@@ -35,19 +35,24 @@ public class PushNotificationService {
      * @param data Additional data to send with notification
      */
     public void sendNotificationToBuyer(Long buyerId, String title, String body, Map<String, Object> data) {
+        sendNotificationToUser(buyerId, title, body, data);
+    }
+
+    /** Push to any user (buyer or seller) that has a registered Expo device token. */
+    public void sendNotificationToUser(Long userId, String title, String body, Map<String, Object> data) {
         try {
-            User buyer = userRepository.findById(buyerId)
-                    .orElseThrow(() -> new RuntimeException("Buyer not found with id: " + buyerId));
-            
-            String deviceToken = buyer.getDeviceToken();
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new RuntimeException("User not found with id: " + userId));
+
+            String deviceToken = user.getDeviceToken();
             if (deviceToken == null || deviceToken.trim().isEmpty()) {
-                log.warn("Buyer {} does not have a device token registered", buyerId);
+                log.warn("User {} does not have a device token registered", userId);
                 return;
             }
-            
+
             sendExpoPushNotification(deviceToken, title, body, data);
         } catch (Exception e) {
-            log.error("Error sending push notification to buyer {}: {}", buyerId, e.getMessage(), e);
+            log.error("Error sending push notification to user {}: {}", userId, e.getMessage(), e);
         }
     }
     

@@ -69,12 +69,20 @@ public class MenuController {
     @PutMapping("/{id}/stock")
     public ResponseEntity<ApiResponse<MenuItem>> updateStock(
             @PathVariable Long id, 
-            @RequestBody Map<String, Object> payload) {
-        Integer quantity = (Integer) payload.get("quantity");
-        String changedBy = (String) payload.getOrDefault("changedBy", "admin");
-        String notes = (String) payload.get("notes");
+            @RequestBody Map<String, Object> payload,
+            HttpServletRequest request) {
+        User currentUser = (User) request.getAttribute("currentUser");
+        Object rawQuantity = payload.get("quantity");
+        Integer quantity = null;
+        if (rawQuantity instanceof Number) {
+            quantity = ((Number) rawQuantity).intValue();
+        }
+        String changedBy = payload.get("changedBy") != null
+            ? String.valueOf(payload.get("changedBy"))
+            : (currentUser != null ? currentUser.getUsername() : "seller");
+        String notes = payload.get("notes") != null ? String.valueOf(payload.get("notes")) : null;
         
-        MenuItem updatedItem = menuService.updateStock(id, quantity, changedBy, notes);
+        MenuItem updatedItem = menuService.updateStock(id, quantity, changedBy, notes, currentUser);
         return ResponseEntity.ok(ApiResponse.success("Stock updated successfully", updatedItem));
     }
     

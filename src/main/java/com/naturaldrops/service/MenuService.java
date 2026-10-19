@@ -56,10 +56,16 @@ public class MenuService {
             }
             return menuItemRepository.findBySellerIdWithMedia(seller.getId());
         }
+        List<MenuItem> buyerItems;
         if (user.getLinkedSellerId() != null) {
-            return menuItemRepository.findBySellerIdWithMedia(user.getLinkedSellerId());
+            buyerItems = menuItemRepository.findBySellerIdWithMedia(user.getLinkedSellerId());
+        } else {
+            buyerItems = menuItemRepository.findUnassignedWithMedia();
         }
-        return menuItemRepository.findUnassignedWithMedia();
+        // Buyers only see products marked in stock (stockQuantity > 0).
+        return buyerItems.stream()
+                .filter(item -> item.getStockQuantity() != null && item.getStockQuantity() > 0)
+                .collect(java.util.stream.Collectors.toList());
     }
     
     public MenuItem getMenuItemById(Long id) {
@@ -140,27 +146,31 @@ public class MenuService {
     public MenuItem updateMenuItem(Long id, MenuItem menuItemDetails, User currentUser) {
         MenuItem menuItem = getMenuItemById(id);
         assertCanManage(menuItem, currentUser);
-        
-        menuItem.setName(menuItemDetails.getName());
-        menuItem.setCategory(menuItemDetails.getCategory());
-        
-        // Update image field - always update if provided (even if null to clear it)
-        // This ensures the image field is properly updated in the database
-        menuItem.setImage(menuItemDetails.getImage());
-        
-        menuItem.setDescription(normalizeDescription(menuItemDetails.getDescription()));
 
+        // Partial update: only overwrite fields that were sent (non-null).
+        if (menuItemDetails.getName() != null && !menuItemDetails.getName().trim().isEmpty()) {
+            menuItem.setName(menuItemDetails.getName().trim());
+        }
+        if (menuItemDetails.getCategory() != null) {
+            menuItem.setCategory(menuItemDetails.getCategory());
+        }
+        if (menuItemDetails.getImage() != null) {
+            menuItem.setImage(menuItemDetails.getImage());
+        }
+        if (menuItemDetails.getDescription() != null) {
+            menuItem.setDescription(normalizeDescription(menuItemDetails.getDescription()));
+        }
         if (menuItemDetails.getStockQuantity() != null) {
             menuItem.setStockQuantity(menuItemDetails.getStockQuantity());
         }
         if (menuItemDetails.getLowStockThreshold() != null) {
             menuItem.setLowStockThreshold(menuItemDetails.getLowStockThreshold());
         }
-        menuItem.setRate(menuItemDetails.getRate());
+        if (menuItemDetails.getRate() != null) {
+            menuItem.setRate(menuItemDetails.getRate());
+        }
         menuItem.setUpdatedAt(LocalDateTime.now());
-        
-        // Save and return the updated item
-        // The image field will be properly persisted and returned in the response
+
         MenuItem saved = menuItemRepository.save(menuItem);
         return getMenuItemById(saved.getId());
     }
@@ -176,9 +186,13 @@ public class MenuService {
     }
     
     @Transactional
-    public MenuItem updateStock(Long id, Integer quantity, String changedBy, String notes) {
+    public MenuItem updateStock(Long id, Integer quantity, String changedBy, String notes, User currentUser) {
         MenuItem menuItem = getMenuItemById(id);
-        Integer quantityBefore = menuItem.getStockQuantity();
+        assertCanManage(menuItem, currentUser);
+        if (quantity == null || quantity < 0) {
+            throw new BadRequestException("Stock quantity must be zero or greater");
+        }
+        Integer quantityBefore = menuItem.getStockQuantity() == null ? 0 : menuItem.getStockQuantity();
         Integer quantityChange = quantity - quantityBefore;
         
         menuItem.setStockQuantity(quantity);
@@ -191,7 +205,7 @@ public class MenuService {
         history.setQuantityChange(quantityChange);
         history.setQuantityBefore(quantityBefore);
         history.setQuantityAfter(quantity);
-        history.setChangedBy(changedBy);
+        history.setChangedBy(changedBy != null && !changedBy.trim().isEmpty() ? changedBy.trim() : "seller");
         history.setChangedAt(LocalDateTime.now());
         history.setNotes(notes);
         stockHistoryRepository.save(history);
