@@ -117,4 +117,18 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 | `MAIL_PASSWORD` | No | Gmail app password |
 | `FRONTEND_BASE_URL` | No | Frontend URL (defaults to http://localhost:8081) |
 | `PORT` | No | Server port (defaults to 8080) |
+| `DOZZLE_URL` | No | Dozzle log UI URL (defaults to http://localhost:8082) |
+| `DOZZLE_PORT` | No | Host port for Dozzle (defaults to 8082) |
+| `DOZZLE_USERNAME` / `DOZZLE_PASSWORD` | No | Optional Dozzle basic auth |
+
+### Live logs with Dozzle
+
+```bash
+cd Natural-Drops
+docker compose up -d --build
+```
+
+- Dozzle UI: http://localhost:8082  
+- Admin app → **More → Live Logs (Dozzle)**  
+- Configure URL: **More → App Settings → Dozzle logs**
 

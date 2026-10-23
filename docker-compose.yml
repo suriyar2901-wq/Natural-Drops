@@ -1,0 +1,63 @@
+# Natural Drops — backend + Dozzle live log viewer
+# Usage:
+#   docker compose up -d --build
+#   Backend API:  http://localhost:8080
+#   Dozzle logs:  http://localhost:8082
+#
+# Dozzle shows Docker container logs (backend / frontend containers).
+# Open Admin app → More → Live Logs (Dozzle)
+
+services:
+  backend:
+    build: .
+    container_name: natural-drops-backend
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      PORT: 8080
+      DOZZLE_URL: ${DOZZLE_URL:-http://localhost:8082}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8081}
+    volumes:
+      - backend-logs:/app/logs
+    restart: unless-stopped
+    labels:
+      - "com.naturaldrops.service=backend"
+      - "com.naturaldrops.role=api"
+
+  # Optional: run frontend as a container so it also appears in Dozzle
+  # Uncomment when you have a frontend Dockerfile in natural-drops-frontend
+  # frontend:
+  #   build: ../natural-drops-frontend
+  #   container_name: natural-drops-frontend
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     EXPO_PUBLIC_API_BASE_URL: http://localhost:8080/api
+  #     EXPO_PUBLIC_DOZZLE_URL: http://localhost:8082
+  #   restart: unless-stopped
+  #   labels:
+  #     - "com.naturaldrops.service=frontend"
+  #     - "com.naturaldrops.role=web"
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: natural-drops-dozzle
+    ports:
+      - "${DOZZLE_PORT:-8082}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOZZLE_HOSTNAME: Natural Drops Logs
+      # Set these in .env for basic auth (recommended for live)
+      DOZZLE_USERNAME: ${DOZZLE_USERNAME:-}
+      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-}
+      DOZZLE_NO_ANALYTICS: "true"
+    restart: unless-stopped
+    labels:
+      - "com.naturaldrops.service=dozzle"
+      - "com.naturaldrops.role=logs"
+
+volumes:
+  backend-logs:
