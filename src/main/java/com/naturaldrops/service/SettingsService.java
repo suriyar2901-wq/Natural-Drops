@@ -3,7 +3,6 @@ package com.naturaldrops.service;
 import com.naturaldrops.entity.Setting;
 import com.naturaldrops.repository.SettingRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,9 +16,6 @@ import java.util.Map;
 public class SettingsService {
     
     private final SettingRepository settingRepository;
-
-    @Value("${app.dozzle.url:http://localhost:8082}")
-    private String defaultDozzleUrl;
     
     public Map<String, String> getAllSettings() {
         List<Setting> settings = settingRepository.findAll();
@@ -53,7 +49,6 @@ public class SettingsService {
         putDefault(settingsMap, "subscriptionRequired", "true");
         putDefault(settingsMap, "planMonthlyAmount", "499.00");
         putDefault(settingsMap, "planYearlyAmount", "5389.20");
-        putDefault(settingsMap, "dozzleUrl", defaultDozzleUrl != null ? defaultDozzleUrl : "http://localhost:8082");
         
         return settingsMap;
     }
