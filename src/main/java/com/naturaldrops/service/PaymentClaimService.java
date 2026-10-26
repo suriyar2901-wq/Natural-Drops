@@ -11,6 +11,8 @@ import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
 import com.naturaldrops.exception.UnauthorizedException;
+import com.naturaldrops.entity.CashfreePayment;
+import com.naturaldrops.repository.CashfreePaymentRepository;
 import com.naturaldrops.repository.PaymentClaimRepository;
 import com.naturaldrops.repository.SellerRepository;
 import com.naturaldrops.repository.SellerSubscriptionRepository;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +32,13 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PaymentClaimService {
 
+    private static final List<CashfreePayment.Status> OPEN_CASHFREE = Arrays.asList(
+            CashfreePayment.Status.CREATED,
+            CashfreePayment.Status.PENDING
+    );
+
     private final PaymentClaimRepository claimRepository;
+    private final CashfreePaymentRepository cashfreePaymentRepository;
     private final SellerRepository sellerRepository;
     private final SellerSubscriptionRepository subscriptionRepository;
     private final UserRepository userRepository;
@@ -116,6 +125,13 @@ public class PaymentClaimService {
         Long orderId = toLong(body.get("orderId"));
         if (claimRepository.findByOrderIdAndStatus(orderId, PaymentClaim.Status.PENDING).isPresent()) {
             throw new BadRequestException("This bill already has a payment waiting for the seller");
+        }
+        if (cashfreePaymentRepository.existsByOrderIdAndStatusIn(orderId, OPEN_CASHFREE)) {
+            throw new BadRequestException(
+                    "A Cashfree payment is already in progress for this bill. Finish or abandon it before claiming UPI.");
+        }
+        if (cashfreePaymentRepository.existsByOrderIdAndPaymentAppliedTrue(orderId)) {
+            throw new BadRequestException("This bill was already paid via Cashfree");
         }
         BigDecimal amount = parseAmount(body.get("amount"));
         shopService.assertBuyerCanPayOrder(buyer.getId(), orderId, amount);

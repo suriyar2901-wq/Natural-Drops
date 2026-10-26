@@ -32,6 +32,7 @@ public class JwtTokenFilter extends OncePerRequestFilter {
         "/api/auth/reset-password",
         "/api/auth/refresh-token",  // Refresh token endpoint uses refresh token, not access token
         "/api/health",  // Health check endpoint
+        "/api/payments/cashfree/webhook",  // Cashfree webhook (signature verified in service)
         "/api/settings/customer-contact-number",  // GET only - public contact info
         "/api/settings/customer-support-email",   // GET only - public contact info
         "/api/settings/support-contacts"
@@ -169,7 +170,11 @@ public class JwtTokenFilter extends OncePerRequestFilter {
                 log.debug("✅ Public endpoint match (exact): {} {} == {}", method, normalizedPath, publicEndpoint);
                 return true;
             }
-            // Also check if it's a sub-path (e.g., /api/auth/login/extra)
+            // Prefix match for auth/settings only — never widen the Cashfree webhook to sibling payment APIs
+            if ("/api/payments/cashfree/webhook".equals(publicEndpoint)
+                    || "/api/health".equals(publicEndpoint)) {
+                continue;
+            }
             if (normalizedPath.startsWith(publicEndpoint + "/")) {
                 log.debug("✅ Public endpoint match (prefix): {} {} starts with {}", method, normalizedPath, publicEndpoint);
                 return true;

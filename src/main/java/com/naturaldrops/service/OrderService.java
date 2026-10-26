@@ -99,6 +99,13 @@ public class OrderService {
         return orderRepository.findByIdWithItems(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + id));
     }
+
+    /** Row lock for payment apply / create races (must run inside a transaction). */
+    @Transactional
+    public Order getOrderByIdForUpdate(Long id) {
+        return orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + id));
+    }
     
     public List<Order> getOrdersByBuyerId(Long buyerId) {
         return orderRepository.findByBuyerIdOrderByOrderDateDesc(buyerId);
@@ -741,6 +748,21 @@ public class OrderService {
         }
     }
 
+    /**
+     * Unpaid balance for an order bill.
+     * For PARTIALLY_PAID, {@code finalBillAmount} is treated as amount already paid.
+     */
+    @Transactional(readOnly = true)
+    public BigDecimal unpaidBillBalance(Order order) {
+        if (order == null) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal total = order.getTotal() == null ? BigDecimal.ZERO : order.getTotal();
+        BigDecimal already = amountAlreadyPaid(order, total);
+        BigDecimal balance = total.subtract(already);
+        return balance.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : balance;
+    }
+
     @Transactional(readOnly = true)
     public void assertBuyerBillPayable(Long buyerUserId, Long orderId, BigDecimal amount) {
         Order order = getOrderById(orderId);
@@ -753,12 +775,7 @@ public class OrderService {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Enter a payment amount");
         }
-        BigDecimal total = order.getTotal() == null ? BigDecimal.ZERO : order.getTotal();
-        BigDecimal already = amountAlreadyPaid(order, total);
-        BigDecimal balance = total.subtract(already);
-        if (balance.compareTo(BigDecimal.ZERO) < 0) {
-            balance = BigDecimal.ZERO;
-        }
+        BigDecimal balance = unpaidBillBalance(order);
         if (amount.compareTo(balance) > 0) {
             throw new BadRequestException("Amount is more than the unpaid balance");
         }

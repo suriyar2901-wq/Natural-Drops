@@ -144,9 +144,47 @@ src/main/java/com/naturaldrops/
 
 ## Development Notes
 - Uses BCrypt for password encryption
-- Session-based authentication
-- CORS enabled for Angular frontend (localhost:4200)
+- JWT authentication for `/api/**` (see `JwtTokenFilter`)
+- CORS enabled for Expo web / Vercel
 - Auto-creates default admin and menu items on first run
+- Manual UPI bill claims (`/api/payments/order/...`) remain the default buyer flow
+
+## Cashfree Payment Gateway (Sandbox — Phase 1 backend)
+
+Buyer bill payments can also be collected via Cashfree. Orders are created **only on the server**. Credentials never leave the backend. Manual UPI/QR/UTR claim + seller confirm is unchanged.
+
+### Environment variables (Render / Docker / local)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `CASHFREE_CLIENT_ID` | Yes (for Cashfree APIs) | Cashfree App ID from Merchant Dashboard |
+| `CASHFREE_CLIENT_SECRET` | Yes (for Cashfree APIs) | Cashfree Secret Key — never commit |
+| `CASHFREE_ENV` | No | `SANDBOX` (default) or `PRODUCTION` |
+| `CASHFREE_API_VERSION` | No | Defaults to `2023-08-01` |
+
+### New API endpoints
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `POST` | `/api/payments/cashfree/orders` | Buyer JWT | Body `{ "orderId": <ndOrderId> }`. Amount = server unpaid balance. Returns `paymentSessionId`, `cfOrderId`, `environment`. |
+| `GET` | `/api/payments/cashfree/orders/{cfOrderId}/status` | Buyer JWT | Fetches status from Cashfree; applies bill payment only when `PAID` (idempotent). |
+| `POST` | `/api/payments/cashfree/webhook` | Public + HMAC signature | Verifies `x-webhook-signature` / `x-webhook-timestamp` on raw body; confirms with Cashfree before marking paid. |
+
+### Sandbox setup
+
+1. Create a Cashfree test account and generate Sandbox API keys.
+2. Set `CASHFREE_CLIENT_ID`, `CASHFREE_CLIENT_SECRET`, and `CASHFREE_ENV=SANDBOX` on Render (or local env / `application-local.properties` mapped via env).
+3. In Cashfree Dashboard → Developers → Webhooks (Sandbox), set notify URL to:  
+   `https://<your-render-host>/api/payments/cashfree/webhook`
+4. Redeploy the backend so Hibernate can create the `cashfree_payments` table (`ddl-auto=update`).
+5. Call create-order with a buyer JWT for an unpaid order, then complete payment in Cashfree checkout (frontend Phase 2) or use Cashfree’s test tools.
+6. Confirm order `paymentStatus` becomes `PAID` only after webhook or status poll shows Cashfree `PAID`. Pending/failed never marks paid.
+
+### Tests
+
+```bash
+mvn -Dtest=CashfreeSignatureVerifierTest,CashfreePaymentServiceTest,CashfreePaymentControllerTest,HealthControllerTest test
+```
 
 ## Author
 Natural Drops Water Supply System
