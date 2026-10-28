@@ -149,9 +149,11 @@ src/main/java/com/naturaldrops/
 - Auto-creates default admin and menu items on first run
 - Manual UPI bill claims (`/api/payments/order/...`) remain the default buyer flow
 
-## Cashfree Payment Gateway (Sandbox — Phase 1 backend)
+## Cashfree Payment Gateway (Sandbox — Phase 1 backend + Phase 2 frontend)
 
 Buyer bill payments can also be collected via Cashfree. Orders are created **only on the server**. Credentials never leave the backend. Manual UPI/QR/UTR claim + seller confirm is unchanged.
+
+**Frontend (Phase 2)** in `natural-drops-frontend`: Buyer Payments → Cashfree checkout on web (`cashfree-js` modal) and native (`react-native-cashfree-pg-sdk` web checkout). Client calls `POST /api/payments/cashfree/orders` then `GET .../status` after the SDK returns. Native requires an Expo dev / EAS build (not Expo Go).
 
 ### Environment variables (Render / Docker / local)
 
