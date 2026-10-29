@@ -94,7 +94,7 @@ class CashfreePaymentServiceTest {
     }
 
     @Test
-    void createOrderUsesServerSideUnpaidBalance() throws Exception {
+    void createOrderDefaultsToFullUnpaidBalance() throws Exception {
         when(orderService.getOrderByIdForUpdate(50L)).thenReturn(order);
         when(orderService.unpaidBillBalance(order)).thenReturn(new BigDecimal("75.50"));
         when(paymentClaimRepository.findByOrderIdAndStatus(50L, PaymentClaim.Status.PENDING))
@@ -117,6 +117,39 @@ class CashfreePaymentServiceTest {
         assertEquals(new BigDecimal("75.50"), result.get("amount"));
         verify(shopService).assertBuyerCanPayOrder(11L, 50L, new BigDecimal("75.50"));
         verify(cashfreeApiClient).createOrder(anyString(), eq(new BigDecimal("75.50")), eq("11"), anyString(), any(), anyString());
+    }
+
+    @Test
+    void createOrderUsesBuyerRequestedAmountWhenWithinBalance() throws Exception {
+        when(orderService.getOrderByIdForUpdate(50L)).thenReturn(order);
+        when(orderService.unpaidBillBalance(order)).thenReturn(new BigDecimal("335.00"));
+        when(paymentClaimRepository.findByOrderIdAndStatus(50L, PaymentClaim.Status.PENDING))
+                .thenReturn(Optional.empty());
+        when(cashfreePaymentRepository.findFirstByOrderIdAndStatusInOrderByCreatedAtDesc(eq(50L), anyList()))
+                .thenReturn(Optional.empty());
+        when(properties.environmentLabel()).thenReturn("SANDBOX");
+
+        ObjectNode cf = mapper.createObjectNode();
+        cf.put("order_id", "ND50PARTIALAMT");
+        cf.put("payment_session_id", "session_200");
+        cf.put("order_status", "ACTIVE");
+        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("200.00")), anyString(), anyString(), any(), anyString()))
+                .thenReturn(cf);
+        when(cashfreePaymentRepository.save(any(CashfreePayment.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> result = service.createOrderForBuyer(buyer, 50L, new BigDecimal("200.00"));
+
+        assertEquals(new BigDecimal("200.00"), result.get("amount"));
+        verify(cashfreeApiClient).createOrder(anyString(), eq(new BigDecimal("200.00")), eq("11"), anyString(), any(), anyString());
+    }
+
+    @Test
+    void createOrderRejectsAmountAboveBalance() {
+        when(orderService.getOrderByIdForUpdate(50L)).thenReturn(order);
+        when(orderService.unpaidBillBalance(order)).thenReturn(new BigDecimal("335.00"));
+        assertThrows(BadRequestException.class,
+                () -> service.createOrderForBuyer(buyer, 50L, new BigDecimal("400.00")));
+        verify(cashfreeApiClient, never()).createOrder(anyString(), any(), anyString(), anyString(), any(), anyString());
     }
 
     @Test

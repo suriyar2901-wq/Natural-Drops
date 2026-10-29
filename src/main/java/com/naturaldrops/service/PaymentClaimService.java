@@ -130,9 +130,7 @@ public class PaymentClaimService {
             throw new BadRequestException(
                     "A Cashfree payment is already in progress for this bill. Finish or abandon it before claiming UPI.");
         }
-        if (cashfreePaymentRepository.existsByOrderIdAndPaymentAppliedTrue(orderId)) {
-            throw new BadRequestException("This bill was already paid via Cashfree");
-        }
+        // Prior partial Cashfree payments are fine — assertBuyerCanPayOrder enforces remaining balance.
         BigDecimal amount = parseAmount(body.get("amount"));
         shopService.assertBuyerCanPayOrder(buyer.getId(), orderId, amount);
         String method = body.get("method") == null ? "UPI" : String.valueOf(body.get("method")).trim().toUpperCase();

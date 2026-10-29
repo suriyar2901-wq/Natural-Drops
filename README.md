@@ -168,7 +168,7 @@ Buyer bill payments can also be collected via Cashfree. Orders are created **onl
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| `POST` | `/api/payments/cashfree/orders` | Buyer JWT | Body `{ "orderId": <ndOrderId> }`. Amount = server unpaid balance. Returns `paymentSessionId`, `cfOrderId`, `environment`. |
+| `POST` | `/api/payments/cashfree/orders` | Buyer JWT | Body `{ "orderId": <ndOrderId>, "amount"?: "<optional>" }`. Amount defaults to unpaid balance; when sent, must be &gt; 0 and ≤ balance (server-capped). Returns `paymentSessionId`, `cfOrderId`, `environment`. |
 | `GET` | `/api/payments/cashfree/orders/{cfOrderId}/status` | Buyer JWT | Fetches status from Cashfree; applies bill payment only when `PAID` (idempotent). |
 | `POST` | `/api/payments/cashfree/webhook` | Public + HMAC signature | Verifies `x-webhook-signature` / `x-webhook-timestamp` on raw body; confirms with Cashfree before marking paid. |
 

@@ -48,11 +48,17 @@ public class CashfreePaymentService {
     private final SellerNetworkService sellerNetworkService;
 
     /**
-     * Creates a Cashfree Sandbox/Production order for the unpaid balance of a Natural Drops order.
-     * Amount is always computed server-side.
+     * Creates a Cashfree order for (part of) an unpaid Natural Drops bill.
+     * {@code requestedAmount} may be null → full unpaid balance. Otherwise must be &gt; 0 and ≤ balance.
+     * Server always caps against live unpaid balance (client cannot overpay).
      */
     @Transactional
     public Map<String, Object> createOrderForBuyer(User buyer, Long naturalDropsOrderId) {
+        return createOrderForBuyer(buyer, naturalDropsOrderId, null);
+    }
+
+    @Transactional
+    public Map<String, Object> createOrderForBuyer(User buyer, Long naturalDropsOrderId, BigDecimal requestedAmount) {
         requireBuyer(buyer);
         if (naturalDropsOrderId == null) {
             throw new BadRequestException("Select the unpaid bill you are paying");
@@ -66,14 +72,13 @@ public class CashfreePaymentService {
         if (order.getStatus() == Order.OrderStatus.canceled) {
             throw new BadRequestException("A canceled order cannot be paid");
         }
-        if (cashfreePaymentRepository.existsByOrderIdAndPaymentAppliedTrue(naturalDropsOrderId)) {
-            throw new BadRequestException("This bill was already paid via Cashfree");
-        }
 
-        BigDecimal amount = orderService.unpaidBillBalance(order).setScale(2, RoundingMode.HALF_UP);
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+        BigDecimal balance = orderService.unpaidBillBalance(order).setScale(2, RoundingMode.HALF_UP);
+        if (balance.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("This bill has no unpaid balance");
         }
+
+        BigDecimal amount = resolvePayAmount(requestedAmount, balance);
 
         // Reuse existing payable checks (shop customer + amount vs balance)
         shopService.assertBuyerCanPayOrder(buyer.getId(), naturalDropsOrderId, amount);
@@ -331,6 +336,24 @@ public class CashfreePaymentService {
         if (buyer == null || buyer.getRole() != User.UserRole.buyer) {
             throw new UnauthorizedException("Only buyers can use Cashfree bill payment");
         }
+    }
+
+    /**
+     * Null/blank request → full balance. Otherwise require positive amount not exceeding balance.
+     */
+    private BigDecimal resolvePayAmount(BigDecimal requestedAmount, BigDecimal balance) {
+        if (requestedAmount == null) {
+            return balance;
+        }
+        BigDecimal amount = requestedAmount.setScale(2, RoundingMode.HALF_UP);
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Enter a valid amount");
+        }
+        if (amount.compareTo(balance) > 0) {
+            throw new BadRequestException(
+                    "Amount cannot exceed " + balance.toPlainString() + " unpaid balance");
+        }
+        return amount;
     }
 
     private void mapAndSetStatus(CashfreePayment payment, String orderStatus, String paymentStatus) {
