@@ -49,8 +49,31 @@ public class SettingsService {
         putDefault(settingsMap, "subscriptionRequired", "true");
         putDefault(settingsMap, "planMonthlyAmount", "499.00");
         putDefault(settingsMap, "planYearlyAmount", "5389.20");
+        putDefault(settingsMap, "taxEnabled", "true");
+        putDefault(settingsMap, "taxRatePercent", "5");
+        putDefault(settingsMap, "platformFeeEnabled", "false");
+        putDefault(settingsMap, "platformFeeAmount", "0.00");
         
         return settingsMap;
+    }
+
+    /** Fee keys exposed to cart / checkout (buyers need these; not full admin settings). */
+    public Map<String, String> feeSettings() {
+        Map<String, String> all = getAllSettings();
+        Map<String, String> fees = new HashMap<String, String>();
+        fees.put("taxEnabled", all.get("taxEnabled"));
+        fees.put("taxRatePercent", all.get("taxRatePercent"));
+        fees.put("platformFeeEnabled", all.get("platformFeeEnabled"));
+        fees.put("platformFeeAmount", all.get("platformFeeAmount"));
+        return fees;
+    }
+
+    @Transactional
+    public void deleteSetting(String key) {
+        if (key == null || key.trim().isEmpty()) {
+            return;
+        }
+        settingRepository.findBySettingKey(key.trim()).ifPresent(settingRepository::delete);
     }
     
     public Map<String, String> supportContacts() {

@@ -51,6 +51,7 @@ public class ShopService {
     private final EmailService emailService;
     private final CanAccountService canAccountService;
     private final AccountIdentityService accountIdentityService;
+    private final PushNotificationService pushNotificationService;
 
     @Transactional(readOnly = true)
     public List<ShopCustomer> listCustomers(Long sellerUserId) {
@@ -509,6 +510,18 @@ public class ShopService {
             String upiId = incoming.getUpiId().trim();
             profile.setUpiId(upiId.isEmpty() ? null : upiId);
         }
+        if (incoming.getDeliveryChargePerKm() != null) {
+            if (incoming.getDeliveryChargePerKm().compareTo(BigDecimal.ZERO) < 0) {
+                throw new BadRequestException("Delivery charge per km cannot be negative");
+            }
+            profile.setDeliveryChargePerKm(incoming.getDeliveryChargePerKm());
+        }
+        if (incoming.getLatitude() != null) {
+            profile.setLatitude(incoming.getLatitude());
+        }
+        if (incoming.getLongitude() != null) {
+            profile.setLongitude(incoming.getLongitude());
+        }
         if (incoming.getOpenTime() != null || incoming.getCloseTime() != null) {
             String openTime = normalizeClock(incoming.getOpenTime());
             String closeTime = normalizeClock(incoming.getCloseTime());
@@ -578,6 +591,9 @@ public class ShopService {
         if (profile != null && profile.getBusinessName() != null) {
             result.put("sellerBusiness", profile.getBusinessName());
         }
+        result.put("deliveryChargePerKm", profile != null ? profile.getDeliveryChargePerKm() : null);
+        result.put("shopLatitude", profile != null ? profile.getLatitude() : null);
+        result.put("shopLongitude", profile != null ? profile.getLongitude() : null);
         putShopHours(result, profile);
         return result;
     }
@@ -661,20 +677,66 @@ public class ShopService {
         String name = buyer.getFullName() != null && !buyer.getFullName().trim().isEmpty()
                 ? buyer.getFullName().trim()
                 : buyer.getUsername();
-        String address = buyer.getAddress() != null && !buyer.getAddress().trim().isEmpty()
-                ? buyer.getAddress().trim()
-                : "the delivery address";
+        String address = buyerDeliveryAddress(buyer);
         Long sellerUserId = customer != null ? customer.getSellerUserId() : null;
         if (sellerUserId == null) {
             sellerUserId = sellerNetworkService.sellerUserIdForBuyer(buyerUserId);
         }
-        sellerNetworkService.postInboxMessage(
+        if (sellerUserId == null) {
+            throw new BadRequestException("No seller is linked to your account yet");
+        }
+        String title = "Empty cans ready";
+        String inboxBody = name + " marked " + quantity + " empty can" + (quantity == 1 ? "" : "s")
+                + " ready for pickup at " + address + ".";
+        sellerNetworkService.postInboxMessage(sellerUserId, buyerUserId, title, inboxBody);
+        Map<String, Object> pushData = new HashMap<String, Object>();
+        pushData.put("type", "EMPTY_CANS_READY");
+        pushData.put("buyerUserId", buyerUserId);
+        pushData.put("quantity", Integer.valueOf(quantity));
+        if (customer != null && customer.getId() != null) {
+            pushData.put("customerId", customer.getId());
+        }
+        pushNotificationService.sendNotificationToUser(
                 sellerUserId,
-                buyerUserId,
-                "Empty cans ready",
-                name + " has " + quantity + " empty can" + (quantity == 1 ? "" : "s")
-                        + " ready for pickup at " + address + "."
+                title,
+                name + ": " + quantity + " empty can" + (quantity == 1 ? "" : "s") + " ready for pickup",
+                pushData
         );
+    }
+
+    private String buyerDeliveryAddress(User buyer) {
+        if (buyer == null) {
+            return "the delivery address";
+        }
+        List<String> parts = new ArrayList<String>();
+        if (buyer.getHouseDoorNo() != null && !buyer.getHouseDoorNo().trim().isEmpty()) {
+            parts.add(buyer.getHouseDoorNo().trim());
+        }
+        if (buyer.getStreetArea() != null && !buyer.getStreetArea().trim().isEmpty()) {
+            parts.add(buyer.getStreetArea().trim());
+        }
+        if (buyer.getCity() != null && !buyer.getCity().trim().isEmpty()) {
+            parts.add(buyer.getCity().trim());
+        }
+        if (buyer.getDistrict() != null && !buyer.getDistrict().trim().isEmpty()) {
+            parts.add(buyer.getDistrict().trim());
+        }
+        if (buyer.getState() != null && !buyer.getState().trim().isEmpty()) {
+            parts.add(buyer.getState().trim());
+        }
+        if (buyer.getPincode() != null && !buyer.getPincode().trim().isEmpty()) {
+            parts.add(buyer.getPincode().trim());
+        }
+        if (buyer.getLandmark() != null && !buyer.getLandmark().trim().isEmpty()) {
+            parts.add(buyer.getLandmark().trim());
+        }
+        if (!parts.isEmpty()) {
+            return String.join(", ", parts);
+        }
+        if (buyer.getAddress() != null && !buyer.getAddress().trim().isEmpty()) {
+            return buyer.getAddress().trim();
+        }
+        return "the delivery address";
     }
 
     private void putShopHours(Map<String, Object> result, ShopProfile profile) {

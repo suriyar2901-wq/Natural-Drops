@@ -57,4 +57,15 @@ public class ShopProfile {
     /** Seller turns this on when buyers should see the shop time and leave days. */
     @Column(name = "show_hours_to_buyer")
     private Boolean showHoursToBuyer;
+
+    /** Delivery charge in rupees per kilometre (seller-controlled). Null/0 = free delivery. */
+    @Column(name = "delivery_charge_per_km", precision = 10, scale = 2)
+    private java.math.BigDecimal deliveryChargePerKm;
+
+    /** Shop origin for distance-based delivery (optional). */
+    @Column(name = "latitude", precision = 10, scale = 8)
+    private Double latitude;
+
+    @Column(name = "longitude", precision = 11, scale = 8)
+    private Double longitude;
 }

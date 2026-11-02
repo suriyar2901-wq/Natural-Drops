@@ -229,9 +229,6 @@ public class BuyerRegularOrderService {
         if (items.isEmpty()) {
             throw new BadRequestException("Regular order has no items");
         }
-        BigDecimal tax = subtotal.multiply(new BigDecimal("0.05")).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal total = subtotal.add(tax).add(new BigDecimal("20")).setScale(2, RoundingMode.HALF_UP);
-
         CreateOrderRequest request = new CreateOrderRequest();
         request.setBuyerId(buyer.getId());
         request.setBuyerName(buyer.getFullName() != null && !buyer.getFullName().trim().isEmpty()
@@ -242,7 +239,8 @@ public class BuyerRegularOrderService {
         request.setDeliveryAddress(plan.getDeliveryAddress());
         request.setLatitude(plan.getLatitude());
         request.setLongitude(plan.getLongitude());
-        request.setTotal(total);
+        // Total is recomputed server-side in OrderService.createOrder via PricingService
+        request.setTotal(subtotal);
         request.setScheduledDeliveryDate(deliveryDate.toString());
         request.setDeliveryTime(plan.getDeliveryTime());
         request.setNote("Regular order");

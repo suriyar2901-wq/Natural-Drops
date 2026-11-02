@@ -43,6 +43,7 @@ public class OrderService {
     private final CanEventRepository canEventRepository;
     private final UserRepository userRepository;
     private final CanAccountService canAccountService;
+    private final PricingService pricingService;
     
     public List<Order> getAllOrders() {
         return orderRepository.findAllByOrderByOrderDateDesc();
@@ -160,7 +161,6 @@ public class OrderService {
             order.setLongitude(request.getLongitude());
         }
         
-        order.setTotal(request.getTotal());
         if (request.getNote() != null && !request.getNote().trim().isEmpty()) {
             order.setBillingNotes(request.getNote().trim());
         }
@@ -169,6 +169,7 @@ public class OrderService {
         applyBuyerDeliverySlot(order, request);
         
         // Add order items
+        BigDecimal itemsSubtotal = BigDecimal.ZERO;
         for (CreateOrderRequest.OrderItemRequest itemRequest : request.getItems()) {
             OrderItem orderItem = new OrderItem();
             orderItem.setMenuItemId(itemRequest.getMenuItemId());
@@ -178,7 +179,23 @@ public class OrderService {
             orderItem.setCartQuantity(itemRequest.getCartQuantity());
             orderItem.setSubtotal(itemRequest.getSubtotal());
             order.addItem(orderItem);
+            if (itemRequest.getSubtotal() != null) {
+                itemsSubtotal = itemsSubtotal.add(itemRequest.getSubtotal());
+            } else if (itemRequest.getRate() != null && itemRequest.getQuantity() != null) {
+                itemsSubtotal = itemsSubtotal.add(
+                        itemRequest.getRate().multiply(BigDecimal.valueOf(itemRequest.getQuantity())));
+            }
         }
+        Long sellerUserId = order.getSellerUserId() != null
+                ? order.getSellerUserId()
+                : sellerNetworkService.sellerUserIdForBuyer(request.getBuyerId());
+        order.setSellerUserId(sellerUserId);
+        order.setTotal(pricingService.totalForBuyer(
+                request.getBuyerId(),
+                itemsSubtotal,
+                order.getLatitude(),
+                order.getLongitude()
+        ));
         
         Order savedOrder = orderRepository.save(order);
         
@@ -355,11 +372,16 @@ public class OrderService {
             subtotalSum = subtotalSum.add(itemSubtotal);
         }
 
-        // Recalculate total similar to buyer checkout: 5% tax + fixed delivery 20
-        BigDecimal tax = subtotalSum.multiply(new BigDecimal("0.05"));
-        BigDecimal deliveryCharge = new BigDecimal("20.00");
-        BigDecimal total = subtotalSum.add(tax).add(deliveryCharge).setScale(2, RoundingMode.HALF_UP);
-        order.setTotal(total);
+        Long sellerUserId = order.getSellerUserId() != null
+                ? order.getSellerUserId()
+                : sellerNetworkService.sellerUserIdForBuyer(order.getBuyerId());
+        order.setSellerUserId(sellerUserId);
+        order.setTotal(pricingService.totalForBuyer(
+                order.getBuyerId(),
+                subtotalSum,
+                order.getLatitude(),
+                order.getLongitude()
+        ));
 
         Order saved = orderRepository.save(order);
 

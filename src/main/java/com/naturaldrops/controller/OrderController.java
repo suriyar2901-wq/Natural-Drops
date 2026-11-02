@@ -68,7 +68,8 @@ public class OrderController {
         if (user != null && user.getRole() == User.UserRole.buyer && !user.getId().equals(order.getBuyerId())) {
             throw new UnauthorizedException("You can export only your orders");
         }
-        byte[] pdf = orderPdfExportService.generateSingleOrderPdf(order, sellerName != null ? sellerName : "Seller");
+        sellerNetworkService.attachOrderSellerNames(java.util.Collections.singletonList(order));
+        byte[] pdf = orderPdfExportService.generateSingleOrderPdf(order, sellerName);
         String date = java.time.LocalDate.now().toString();
         String filename = "order_" + id + "_" + date + ".pdf";
         return ResponseEntity.ok()
@@ -96,7 +97,8 @@ public class OrderController {
         if (orders.isEmpty()) {
             throw new BadRequestException("No orders in this date range");
         }
-        byte[] pdf = orderPdfExportService.generateMultiOrderPdf(orders, sellerName != null ? sellerName : "Seller");
+        sellerNetworkService.attachOrderSellerNames(orders);
+        byte[] pdf = orderPdfExportService.generateMultiOrderPdf(orders, sellerName);
         String date = java.time.LocalDate.now().toString();
         String filename = "orders_" + date + ".pdf";
         return ResponseEntity.ok()

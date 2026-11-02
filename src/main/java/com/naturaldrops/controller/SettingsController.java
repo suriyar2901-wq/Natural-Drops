@@ -92,5 +92,11 @@ public class SettingsController {
         settingsService.updateSetting(key, value);
         return ResponseEntity.ok(ApiResponse.success("Setting updated successfully", null));
     }
+
+    @DeleteMapping("/{key}")
+    public ResponseEntity<ApiResponse<Object>> deleteSetting(@PathVariable String key) {
+        settingsService.deleteSetting(key);
+        return ResponseEntity.ok(ApiResponse.success("Setting removed", null));
+    }
 }
 
