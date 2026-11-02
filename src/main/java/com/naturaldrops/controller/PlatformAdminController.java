@@ -5,6 +5,7 @@ import com.naturaldrops.dto.request.DeactivateSellerRequest;
 import com.naturaldrops.dto.request.RecordSellerPaymentRequest;
 import com.naturaldrops.dto.request.RenewSubscriptionRequest;
 import com.naturaldrops.dto.request.UpdateSellerRequest;
+import com.naturaldrops.dto.request.UpdateSubscriptionDatesRequest;
 import com.naturaldrops.dto.response.ApiResponse;
 import com.naturaldrops.dto.response.PlatformDashboardResponse;
 import com.naturaldrops.dto.response.SellerAdminResponse;
@@ -111,6 +112,17 @@ public class PlatformAdminController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Subscription renewed",
                 sellerAdminService.renewSubscription(sellerId, body, user.getUsername())));
+    }
+
+    @PutMapping("/subscriptions/{sellerId}/dates")
+    public ResponseEntity<ApiResponse<SellerAdminResponse>> updateSubscriptionDates(
+            @PathVariable Long sellerId,
+            @RequestBody UpdateSubscriptionDatesRequest body,
+            HttpServletRequest request) {
+        requireStaff(request);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Subscription dates updated",
+                sellerAdminService.updateSubscriptionDates(sellerId, body)));
     }
 
     @GetMapping("/payments")

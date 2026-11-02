@@ -5,6 +5,7 @@ import com.naturaldrops.dto.request.DeactivateSellerRequest;
 import com.naturaldrops.dto.request.RecordSellerPaymentRequest;
 import com.naturaldrops.dto.request.RenewSubscriptionRequest;
 import com.naturaldrops.dto.request.UpdateSellerRequest;
+import com.naturaldrops.dto.request.UpdateSubscriptionDatesRequest;
 import com.naturaldrops.dto.response.PlatformDashboardResponse;
 import com.naturaldrops.dto.response.SellerAdminResponse;
 import com.naturaldrops.dto.response.SellerPaymentResponse;
@@ -216,13 +217,15 @@ public class SellerAdminService {
         }
 
         LocalDateTime paidAt = parseDateTime(request.getPaidAt());
-        SellerPayment payment = createPayment(seller, subscription, method, received,
+        SellerSubscription.Plan paymentPlan = subscription.getPlan();
+        SellerPayment payment = createPayment(seller, subscription, paymentPlan, method, received,
                 SellerSubscription.PaymentStatus.SUCCESSFUL, paidAt, request.getNote(), createdBy);
+        payment.setGatewayRef(emptyToNull(request.getGatewayRef()));
         paymentRepository.save(payment);
 
         LocalDate start = paidAt.toLocalDate();
         subscription.setStartDate(start);
-        subscription.setExpiryDate(extendFrom(start, subscription.getPlan()));
+        subscription.setExpiryDate(extendFrom(start, paymentPlan));
         subscription.setPaymentStatus(SellerSubscription.PaymentStatus.SUCCESSFUL);
         subscriptionRepository.save(subscription);
 
@@ -244,9 +247,13 @@ public class SellerAdminService {
                 : subscription.getPlan();
         BigDecimal amount = amountFor(plan);
         LocalDateTime paidAt = parseDateTime(request.getPaidAt());
+        SellerPayment.Method method = request.getMethod() != null && request.getMethod().trim().length() > 0
+                ? parseMethod(request.getMethod())
+                : SellerPayment.Method.CASH;
 
-        SellerPayment payment = createPayment(seller, subscription, SellerPayment.Method.CASH, amount,
+        SellerPayment payment = createPayment(seller, subscription, plan, method, amount,
                 SellerSubscription.PaymentStatus.SUCCESSFUL, paidAt, request.getNote(), createdBy);
+        payment.setGatewayRef(emptyToNull(request.getGatewayRef()));
         paymentRepository.save(payment);
 
         LocalDate today = paidAt.toLocalDate();
@@ -262,6 +269,30 @@ public class SellerAdminService {
         subscription.setPaymentStatus(SellerSubscription.PaymentStatus.SUCCESSFUL);
         subscriptionRepository.save(subscription);
 
+        return toSellerResponse(seller, true);
+    }
+
+    @Transactional
+    public SellerAdminResponse updateSubscriptionDates(Long sellerId, UpdateSubscriptionDatesRequest request) {
+        Seller seller = findSeller(sellerId);
+        SellerSubscription subscription = subscriptionRepository.findBySellerId(sellerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Subscription not found for seller"));
+        if (subscription.getPlan() == SellerSubscription.Plan.FREE) {
+            throw new BadRequestException("Free accounts do not use start/expiry dates. Change to a paid plan first.");
+        }
+
+        LocalDate startDate = parseDateOnly(request.getStartDate(), "Start date");
+        LocalDate expiryDate = parseDateOnly(request.getExpiryDate(), "Expiry date");
+        if (startDate == null || expiryDate == null) {
+            throw new BadRequestException("Start date and expiry date are required (YYYY-MM-DD)");
+        }
+        if (expiryDate.isBefore(startDate)) {
+            throw new BadRequestException("Expiry date cannot be before start date");
+        }
+
+        subscription.setStartDate(startDate);
+        subscription.setExpiryDate(expiryDate);
+        subscriptionRepository.save(subscription);
         return toSellerResponse(seller, true);
     }
 
@@ -312,7 +343,7 @@ public class SellerAdminService {
         subscription.setPaymentStatus(SellerSubscription.PaymentStatus.SUCCESSFUL);
         subscription = subscriptionRepository.save(subscription);
 
-        SellerPayment payment = createPayment(seller, subscription, method, amount,
+        SellerPayment payment = createPayment(seller, subscription, plan, method, amount,
                 SellerSubscription.PaymentStatus.SUCCESSFUL, paidAt, "Seller self-subscribe", user.getUsername());
         paymentRepository.save(payment);
         return toAccessResponse(seller, subscription);
@@ -607,6 +638,9 @@ public class SellerAdminService {
         if ("COMPANY_QR".equals(normalized) || "QR".equals(normalized) || "COMPANY_QR_/_UPI".equals(normalized)) {
             return SellerPayment.Method.UPI;
         }
+        if ("CASHFREE".equals(normalized) || "ONLINE".equals(normalized) || "PAYMENT_GATEWAY".equals(normalized)) {
+            return SellerPayment.Method.GATEWAY;
+        }
         try {
             return SellerPayment.Method.valueOf(normalized);
         } catch (IllegalArgumentException ex) {
@@ -644,6 +678,21 @@ public class SellerAdminService {
         }
     }
 
+    private LocalDate parseDateOnly(String value, String label) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        try {
+            if (trimmed.length() >= 10) {
+                return LocalDate.parse(trimmed.substring(0, 10));
+            }
+            return LocalDate.parse(trimmed);
+        } catch (DateTimeParseException ex) {
+            throw new BadRequestException(label + " must be YYYY-MM-DD");
+        }
+    }
+
     private LocalDateTime parseDateTime(String value) {
         if (value == null || value.trim().isEmpty()) {
             return LocalDateTime.now();
@@ -669,16 +718,17 @@ public class SellerAdminService {
         return base.plusMonths(1);
     }
 
-    private SellerPayment createPayment(Seller seller, SellerSubscription subscription, SellerPayment.Method method,
-                                        BigDecimal amount, SellerSubscription.PaymentStatus status,
+    private SellerPayment createPayment(Seller seller, SellerSubscription subscription, SellerSubscription.Plan plan,
+                                        SellerPayment.Method method, BigDecimal amount,
+                                        SellerSubscription.PaymentStatus status,
                                         LocalDateTime paidAt, String note, String createdBy) {
         SellerPayment payment = new SellerPayment();
         payment.setTransactionCode(nextTransactionCode());
         payment.setSellerId(seller.getId());
         payment.setSubscriptionId(subscription.getId());
-        payment.setPlan(subscription.getPlan());
+        payment.setPlan(plan);
         payment.setAmount(amount);
-        payment.setPlanPriceSnapshot(subscription.getAmount());
+        payment.setPlanPriceSnapshot(amount);
         payment.setMethod(method);
         payment.setStatus(status);
         payment.setNote(emptyToNull(note));

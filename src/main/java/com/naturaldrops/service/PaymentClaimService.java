@@ -268,6 +268,7 @@ public class PaymentClaimService {
         } else {
             RenewSubscriptionRequest renew = new RenewSubscriptionRequest();
             renew.setPlan(claim.getPlan());
+            renew.setMethod(claim.getMethod());
             renew.setPaidAt(LocalDateTime.now().toString().substring(0, 19));
             renew.setNote(note);
             sellerAdminService.renewSubscription(seller.getId(), renew, admin.getUsername());

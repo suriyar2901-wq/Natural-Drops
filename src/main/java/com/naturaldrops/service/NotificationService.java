@@ -49,6 +49,10 @@ public class NotificationService {
     }
 
     private List<Notification> scopeNotifications(List<Notification> notifications, User currentUser) {
+        // Platform admin must not see seller order notifications (sellers only).
+        if (currentUser != null && currentUser.getRole() == User.UserRole.admin) {
+            return new ArrayList<Notification>();
+        }
         if (currentUser == null || currentUser.getRole() != User.UserRole.seller) {
             return notifications;
         }
