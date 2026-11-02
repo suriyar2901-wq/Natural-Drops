@@ -90,6 +90,20 @@ public class PaymentClaimController {
                 paymentClaimService.claimOrderBill(buyer, body)));
     }
 
+    @PostMapping("/order/{id}/reference")
+    public ResponseEntity<ApiResponse<PaymentClaim>> attachOrderReference(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User buyer = requireBuyer(request);
+        String reference = body == null || body.get("upiReference") == null
+                ? ""
+                : String.valueOf(body.get("upiReference"));
+        return ResponseEntity.ok(ApiResponse.success(
+                "UTR saved",
+                paymentClaimService.attachOrderReference(buyer, id, reference)));
+    }
+
     @GetMapping("/order/mine")
     public ResponseEntity<ApiResponse<List<PaymentClaim>>> myOrderClaims(HttpServletRequest request) {
         User buyer = requireBuyer(request);

@@ -138,8 +138,8 @@ public class PaymentClaimService {
             method = "UPI";
         }
         String reference = body.get("upiReference") == null ? null : String.valueOf(body.get("upiReference")).trim();
-        if ("UPI".equals(method) && (reference == null || reference.length() < 6)) {
-            throw new BadRequestException("Enter the UPI transaction / UTR number from your payment app");
+        if (reference != null && !reference.isEmpty() && reference.length() < 6) {
+            throw new BadRequestException("UTR must be at least 6 characters, or leave it blank");
         }
         Long sellerUserId = sellerNetworkService.sellerUserIdForBuyer(buyer.getId());
         Seller seller = null;
@@ -187,6 +187,37 @@ public class PaymentClaimService {
             );
         }
         return saved;
+    }
+
+    /**
+     * Optional UTR after a one-tap "I have paid" claim. Buyer can add it later; seller still confirms.
+     */
+    @Transactional
+    public PaymentClaim attachOrderReference(User buyer, Long claimId, String upiReference) {
+        if (buyer == null || buyer.getRole() != User.UserRole.buyer) {
+            throw new UnauthorizedException("Only buyers can update a bill payment");
+        }
+        if (claimId == null) {
+            throw new BadRequestException("Payment claim is required");
+        }
+        String reference = upiReference == null ? "" : upiReference.trim();
+        if (reference.length() < 6) {
+            throw new BadRequestException("Enter the UPI transaction / UTR number");
+        }
+        PaymentClaim claim = claimRepository.findById(claimId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment claim not found"));
+        if (!buyer.getId().equals(claim.getClaimantUserId())) {
+            throw new UnauthorizedException("You can update only your own payment");
+        }
+        if (claim.getStatus() != PaymentClaim.Status.PENDING) {
+            throw new BadRequestException("Only a payment waiting for the seller can get a UTR");
+        }
+        claim.setUpiReference(reference);
+        String note = claim.getNote() == null ? "" : claim.getNote();
+        if (!note.contains(reference)) {
+            claim.setNote(note + (note.isEmpty() ? "" : " · ") + "UTR " + reference);
+        }
+        return claimRepository.save(claim);
     }
 
     public List<PaymentClaim> pendingSubscriptions() {
