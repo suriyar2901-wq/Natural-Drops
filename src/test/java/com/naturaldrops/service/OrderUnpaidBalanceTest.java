@@ -28,6 +28,7 @@ class OrderUnpaidBalanceTest {
     @Mock private CanEventRepository canEventRepository;
     @Mock private UserRepository userRepository;
     @Mock private CanAccountService canAccountService;
+    @Mock private PricingService pricingService;
 
     private OrderService orderService;
 
@@ -42,7 +43,8 @@ class OrderUnpaidBalanceTest {
                 shopCustomerRepository,
                 canEventRepository,
                 userRepository,
-                canAccountService);
+                canAccountService,
+                pricingService);
     }
 
     @Test

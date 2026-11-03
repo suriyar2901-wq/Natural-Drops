@@ -54,8 +54,13 @@ public class CashfreePayment {
     @Column(name = "seller_user_id")
     private Long sellerUserId;
 
+    /**
+     * Nullable in DB so existing rows can be backfilled (Hibernate cannot add NOT NULL
+     * without a default on populated tables). Application code always sets ORDER_BILL or
+     * SELLER_SUBSCRIPTION; see CashfreePaymentsSchemaFix.
+     */
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
+    @Column(length = 32)
     private Purpose purpose = Purpose.ORDER_BILL;
 
     /** MONTHLY / YEARLY when purpose is SELLER_SUBSCRIPTION */
