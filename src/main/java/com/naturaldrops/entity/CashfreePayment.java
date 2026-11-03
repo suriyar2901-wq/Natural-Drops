@@ -34,19 +34,33 @@ public class CashfreePayment {
         CANCELLED
     }
 
+    public enum Purpose {
+        ORDER_BILL,
+        SELLER_SUBSCRIPTION
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** Natural Drops order id */
-    @Column(name = "order_id", nullable = false)
+    /** Natural Drops order id (null for seller subscription payments) */
+    @Column(name = "order_id")
     private Long orderId;
 
+    /** Buyer user id for bill payments; seller user id for subscription ownership checks */
     @Column(name = "buyer_user_id", nullable = false)
     private Long buyerUserId;
 
     @Column(name = "seller_user_id")
     private Long sellerUserId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private Purpose purpose = Purpose.ORDER_BILL;
+
+    /** MONTHLY / YEARLY when purpose is SELLER_SUBSCRIPTION */
+    @Column(name = "subscription_plan", length = 20)
+    private String subscriptionPlan;
 
     /** Merchant order id sent to Cashfree (unique string) */
     @Column(name = "cf_order_id", nullable = false, length = 64)
@@ -100,6 +114,9 @@ public class CashfreePayment {
         }
         if (status == null) {
             status = Status.CREATED;
+        }
+        if (purpose == null) {
+            purpose = Purpose.ORDER_BILL;
         }
     }
 

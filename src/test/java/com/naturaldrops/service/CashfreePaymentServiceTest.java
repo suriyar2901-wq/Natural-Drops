@@ -49,9 +49,13 @@ class CashfreePaymentServiceTest {
     @Mock private CashfreeApiClient cashfreeApiClient;
     @Mock private CashfreePaymentRepository cashfreePaymentRepository;
     @Mock private PaymentClaimRepository paymentClaimRepository;
+    @Mock private com.naturaldrops.repository.SellerSubscriptionRepository sellerSubscriptionRepository;
+    @Mock private com.naturaldrops.repository.SellerRepository sellerRepository;
     @Mock private OrderService orderService;
     @Mock private ShopService shopService;
     @Mock private SellerNetworkService sellerNetworkService;
+    @Mock private SellerAdminService sellerAdminService;
+    @Mock private SettingsService settingsService;
 
     @InjectMocks
     private CashfreePaymentService service;
@@ -288,6 +292,7 @@ class CashfreePaymentServiceTest {
     private CashfreePayment basePayment() {
         CashfreePayment payment = new CashfreePayment();
         payment.setId(1L);
+        payment.setPurpose(CashfreePayment.Purpose.ORDER_BILL);
         payment.setOrderId(50L);
         payment.setBuyerUserId(11L);
         payment.setSellerUserId(10L);

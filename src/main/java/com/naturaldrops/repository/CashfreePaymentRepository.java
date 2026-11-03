@@ -27,4 +27,7 @@ public interface CashfreePaymentRepository extends JpaRepository<CashfreePayment
     boolean existsByOrderIdAndStatusIn(Long orderId, Collection<CashfreePayment.Status> statuses);
 
     boolean existsByOrderIdAndPaymentAppliedTrue(Long orderId);
+
+    Optional<CashfreePayment> findFirstBySellerUserIdAndPurposeAndStatusInOrderByCreatedAtDesc(
+            Long sellerUserId, CashfreePayment.Purpose purpose, List<CashfreePayment.Status> statuses);
 }

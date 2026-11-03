@@ -50,6 +50,33 @@ public class CashfreePaymentController {
     }
 
     /**
+     * Create a Cashfree order for seller platform subscription.
+     * Body: { "plan": "MONTHLY" | "YEARLY" }.
+     */
+    @PostMapping("/subscription/orders")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> createSubscriptionOrder(
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User seller = requireSeller(request);
+        String plan = body == null || body.get("plan") == null ? "MONTHLY" : String.valueOf(body.get("plan"));
+        return ResponseEntity.ok(ApiResponse.success(
+                "Cashfree subscription order created",
+                cashfreePaymentService.createOrderForSellerSubscription(seller, plan)));
+    }
+
+    /**
+     * Verify subscription Cashfree payment and activate/renew when PAID (idempotent).
+     */
+    @GetMapping("/subscription/orders/{cfOrderId}/status")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> subscriptionStatus(
+            @PathVariable String cfOrderId,
+            HttpServletRequest request) {
+        User seller = requireSeller(request);
+        return ResponseEntity.ok(ApiResponse.success(
+                cashfreePaymentService.verifyAndRefreshSubscriptionStatus(seller, cfOrderId)));
+    }
+
+    /**
      * Public webhook — JWT skipped via JwtTokenFilter PUBLIC_ENDPOINTS.
      * Signature verified on the original raw body before any processing.
      */
@@ -69,6 +96,17 @@ public class CashfreePaymentController {
         }
         if (user.getRole() != User.UserRole.buyer) {
             throw new UnauthorizedException("Only buyers can use Cashfree bill payment");
+        }
+        return user;
+    }
+
+    private User requireSeller(HttpServletRequest request) {
+        User user = (User) request.getAttribute("currentUser");
+        if (user == null) {
+            throw new UnauthorizedException("Not authenticated");
+        }
+        if (user.getRole() != User.UserRole.seller) {
+            throw new UnauthorizedException("Only sellers can use Cashfree subscription payment");
         }
         return user;
     }
