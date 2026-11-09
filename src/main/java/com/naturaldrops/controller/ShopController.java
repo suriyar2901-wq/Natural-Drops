@@ -1,6 +1,7 @@
 package com.naturaldrops.controller;
 
 import com.naturaldrops.dto.response.ApiResponse;
+import com.naturaldrops.dto.response.SellerPaymentResponse;
 import com.naturaldrops.dto.response.SellerSubscriptionAccessResponse;
 import com.naturaldrops.entity.CanEvent;
 import com.naturaldrops.entity.LedgerEvent;
@@ -192,6 +193,12 @@ public class ShopController {
     public ResponseEntity<ApiResponse<SellerSubscriptionAccessResponse>> getSubscription(HttpServletRequest request) {
         User user = requireStaff(request);
         return ResponseEntity.ok(ApiResponse.success(sellerAdminService.getAccessForUser(user)));
+    }
+
+    @GetMapping("/subscription/payments")
+    public ResponseEntity<ApiResponse<List<SellerPaymentResponse>>> getMySubscriptionPayments(HttpServletRequest request) {
+        User user = requireSeller(request);
+        return ResponseEntity.ok(ApiResponse.success(sellerAdminService.listPaymentsForUser(user)));
     }
 
     @PostMapping("/subscription")

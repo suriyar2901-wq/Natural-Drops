@@ -389,6 +389,21 @@ public class SellerAdminService {
         return result;
     }
 
+    /** Seller self-service: subscription payment history for the logged-in shop. */
+    @Transactional(readOnly = true)
+    public List<SellerPaymentResponse> listPaymentsForUser(User user) {
+        Seller seller = resolveSellerForUser(user, false);
+        if (seller == null) {
+            return new ArrayList<SellerPaymentResponse>();
+        }
+        List<SellerPayment> payments = paymentRepository.findBySellerIdOrderByPaidAtDesc(seller.getId());
+        List<SellerPaymentResponse> result = new ArrayList<SellerPaymentResponse>();
+        for (SellerPayment payment : payments) {
+            result.add(toPaymentResponse(payment, seller));
+        }
+        return result;
+    }
+
     @Transactional(readOnly = true)
     public SellerPaymentResponse getPayment(Long id) {
         SellerPayment payment = paymentRepository.findById(id)
