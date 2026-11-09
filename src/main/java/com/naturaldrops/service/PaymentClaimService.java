@@ -99,7 +99,15 @@ public class PaymentClaimService {
         if (method.isEmpty()) {
             method = "UPI";
         }
+        if ("HAND_CASH".equals(method) || "CASH_HAND".equals(method) || "HAND".equals(method)) {
+            method = "CASH";
+        }
+        if (!"UPI".equals(method) && !"CASH".equals(method) && !"GATEWAY".equals(method)) {
+            throw new BadRequestException("Payment method must be UPI, CASH or GATEWAY");
+        }
         String reference = body == null || body.get("upiReference") == null ? null : String.valueOf(body.get("upiReference")).trim();
+        // Ensure subscription row exists for older self-registered sellers
+        sellerNetworkService.ensurePendingSubscription(seller);
         PaymentClaim claim = new PaymentClaim();
         claim.setKind(PaymentClaim.Kind.SUBSCRIPTION);
         claim.setStatus(PaymentClaim.Status.PENDING);
@@ -110,7 +118,11 @@ public class PaymentClaimService {
         claim.setMethod(method);
         claim.setPlan(plan);
         claim.setUpiReference(emptyToNull(reference));
-        claim.setNote(seller.getBusinessName() + " paid subscription by " + method);
+        if ("CASH".equals(method)) {
+            claim.setNote(seller.getBusinessName() + " paid subscription by hand cash — waiting for admin to mark cash received");
+        } else {
+            claim.setNote(seller.getBusinessName() + " paid subscription by " + method);
+        }
         return claimRepository.save(claim);
     }
 

@@ -207,23 +207,47 @@ public class SellerAdminService {
     @Transactional
     public SellerAdminResponse activateWithPayment(Long sellerId, RecordSellerPaymentRequest request, String createdBy) {
         Seller seller = findSeller(sellerId);
-        SellerSubscription subscription = subscriptionRepository.findBySellerId(sellerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Subscription not found for seller"));
+        SellerSubscription.Plan paymentPlan = request.getPlan() != null && request.getPlan().trim().length() > 0
+                ? parsePlan(request.getPlan())
+                : SellerSubscription.Plan.MONTHLY;
+        if (paymentPlan == SellerSubscription.Plan.FREE) {
+            paymentPlan = SellerSubscription.Plan.MONTHLY;
+        }
+
+        SellerSubscription subscription = subscriptionRepository.findBySellerId(sellerId).orElse(null);
+        if (subscription == null) {
+            subscription = new SellerSubscription();
+            subscription.setSellerId(sellerId);
+            subscription.setPlan(paymentPlan);
+            subscription.setAmount(amountFor(paymentPlan));
+            subscription.setPaymentStatus(SellerSubscription.PaymentStatus.PENDING);
+            subscription = subscriptionRepository.save(subscription);
+        } else if (request.getPlan() != null && request.getPlan().trim().length() > 0) {
+            subscription.setPlan(paymentPlan);
+            subscription.setAmount(amountFor(paymentPlan));
+            subscription = subscriptionRepository.save(subscription);
+        } else {
+            paymentPlan = subscription.getPlan() == SellerSubscription.Plan.FREE
+                    ? SellerSubscription.Plan.MONTHLY
+                    : subscription.getPlan();
+        }
 
         SellerPayment.Method method = parseMethod(request.getMethod());
         BigDecimal received = parseAmount(request.getReceivedAmount());
-        if (received.compareTo(subscription.getAmount()) != 0) {
-            throw new BadRequestException("Received amount must exactly match due amount " + subscription.getAmount());
+        BigDecimal due = subscription.getAmount() != null ? subscription.getAmount() : amountFor(paymentPlan);
+        if (received.compareTo(due) != 0) {
+            throw new BadRequestException("Received amount must exactly match due amount " + due);
         }
 
         LocalDateTime paidAt = parseDateTime(request.getPaidAt());
-        SellerSubscription.Plan paymentPlan = subscription.getPlan();
         SellerPayment payment = createPayment(seller, subscription, paymentPlan, method, received,
                 SellerSubscription.PaymentStatus.SUCCESSFUL, paidAt, request.getNote(), createdBy);
         payment.setGatewayRef(emptyToNull(request.getGatewayRef()));
         paymentRepository.save(payment);
 
         LocalDate start = paidAt.toLocalDate();
+        subscription.setPlan(paymentPlan);
+        subscription.setAmount(due);
         subscription.setStartDate(start);
         subscription.setExpiryDate(extendFrom(start, paymentPlan));
         subscription.setPaymentStatus(SellerSubscription.PaymentStatus.SUCCESSFUL);

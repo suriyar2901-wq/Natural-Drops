@@ -10,6 +10,7 @@ import com.naturaldrops.dto.response.LoginResponse;
 import com.naturaldrops.dto.response.RefreshTokenResponse;
 import com.naturaldrops.entity.PasswordResetToken;
 import com.naturaldrops.entity.RefreshToken;
+import com.naturaldrops.entity.Seller;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.AccountStatusException;
 import com.naturaldrops.exception.BadRequestException;
@@ -64,7 +65,7 @@ public class AuthService {
         // Check if username already exists
         if (userRepository.existsByUsername(request.getUsername())) {
             log.warn("❌ [AuthService] Registration failed - Username already exists: {}", request.getUsername());
-            throw new IllegalArgumentException("Username already exists");
+            throw new BadRequestException("Username already exists. If you just registered, go to Login.");
         }
         accountIdentityService.rejectDuplicateContact(request.getPhone(), request.getEmail(), null, null);
         log.info("✅ [AuthService] Username available");
@@ -138,7 +139,10 @@ public class AuthService {
         
         User savedUser = userRepository.save(user);
         if (savedUser.getRole() == User.UserRole.seller) {
-            savedUser.setCompanyCode(sellerNetworkService.createSellerAccount(savedUser, request.getCompanyName()).getCompanyCode());
+            Seller seller = sellerNetworkService.createSellerAccount(savedUser, request.getCompanyName());
+            savedUser.setCompanyCode(seller.getCompanyCode());
+            // Existing sellers linked again still need a pending subscription for pay/activate.
+            sellerNetworkService.ensurePendingSubscription(seller);
         } else if (savedUser.getRole() == User.UserRole.buyer) {
             sellerNetworkService.linkBuyerToCompany(savedUser, request.getCompanyCode());
         }
@@ -159,7 +163,10 @@ public class AuthService {
             log.warn("Account details email was not sent for {}: {}", savedUser.getUsername(), noticeError.getMessage());
         }
         log.info("═══════════════════════════════════════════════════════");
-        
+
+        // Never echo base64 profile photos in the register response — large payloads
+        // time out on mobile/web and the client shows "Registration Failed" even though the account exists.
+        savedUser.setProfilePhoto(null);
         return savedUser;
     }
     

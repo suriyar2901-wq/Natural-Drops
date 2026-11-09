@@ -3,12 +3,14 @@ package com.naturaldrops.service;
 import com.naturaldrops.entity.Order;
 import com.naturaldrops.entity.Seller;
 import com.naturaldrops.entity.SellerInboxMessage;
+import com.naturaldrops.entity.SellerSubscription;
 import com.naturaldrops.entity.ShopCustomer;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
 import com.naturaldrops.repository.SellerInboxMessageRepository;
 import com.naturaldrops.repository.SellerRepository;
+import com.naturaldrops.repository.SellerSubscriptionRepository;
 import com.naturaldrops.repository.ShopCustomerRepository;
 import com.naturaldrops.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,8 @@ public class SellerNetworkService {
     private final UserRepository userRepository;
     private final SellerInboxMessageRepository inboxRepository;
     private final ShopCustomerRepository shopCustomerRepository;
+    private final SellerSubscriptionRepository subscriptionRepository;
+    private final SettingsService settingsService;
 
     public String generateCompanyCode(String companyName) {
         String prefix = sanitizePrefix(companyName);
@@ -116,7 +120,9 @@ public class SellerNetworkService {
             if (user.getAadhaarNumber() != null) {
                 existing.setAadhaarNumber(user.getAadhaarNumber());
             }
-            return sellerRepository.save(existing);
+            existing = sellerRepository.save(existing);
+            ensurePendingSubscription(existing);
+            return existing;
         }
         Seller seller = new Seller();
         seller.setSellerCode(nextSellerCode());
@@ -134,11 +140,48 @@ public class SellerNetworkService {
         seller.setArea(user.getStreetArea() != null && user.getStreetArea().trim().length() > 0 ? user.getStreetArea() : "NA");
         seller.setCity(user.getCity() != null && user.getCity().trim().length() > 0 ? user.getCity() : "NA");
         seller.setPincode(user.getPincode() != null && user.getPincode().trim().length() == 6 ? user.getPincode() : "000000");
-        seller.setAccountStatus(Seller.AccountStatus.ACTIVE);
+        seller.setAccountStatus(Seller.AccountStatus.PENDING);
         seller.setUserId(user.getId());
         seller.setCreatedBy(user.getUsername());
         assignCompanyCode(seller);
-        return sellerRepository.save(seller);
+        seller = sellerRepository.save(seller);
+        ensurePendingSubscription(seller);
+        return seller;
+    }
+
+    /**
+     * Self-registered sellers need a PENDING subscription row so Cashfree / UPI / cash
+     * activation can succeed (admin-created sellers already get one in createSeller).
+     */
+    @Transactional
+    public void ensurePendingSubscription(Seller seller) {
+        if (seller == null || seller.getId() == null) {
+            return;
+        }
+        if (subscriptionRepository.findBySellerId(seller.getId()).isPresent()) {
+            return;
+        }
+        SellerSubscription subscription = new SellerSubscription();
+        subscription.setSellerId(seller.getId());
+        subscription.setPlan(SellerSubscription.Plan.MONTHLY);
+        subscription.setAmount(defaultMonthlyAmount());
+        subscription.setPaymentStatus(SellerSubscription.PaymentStatus.PENDING);
+        subscriptionRepository.save(subscription);
+    }
+
+    private BigDecimal defaultMonthlyAmount() {
+        String raw = settingsService.getSetting("planMonthlyAmount");
+        if (raw != null && !raw.trim().isEmpty()) {
+            try {
+                BigDecimal amount = new BigDecimal(raw.trim());
+                if (amount.compareTo(BigDecimal.ZERO) > 0) {
+                    return amount.setScale(2, BigDecimal.ROUND_HALF_UP);
+                }
+            } catch (NumberFormatException ignored) {
+                // fall through
+            }
+        }
+        return new BigDecimal("499.00");
     }
 
     @Transactional

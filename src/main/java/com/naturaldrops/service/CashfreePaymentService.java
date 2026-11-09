@@ -168,6 +168,7 @@ public class CashfreePaymentService {
         if (seller == null) {
             throw new ResourceNotFoundException("Seller shop not found");
         }
+        sellerNetworkService.ensurePendingSubscription(seller);
         String plan = planValue == null ? "MONTHLY" : planValue.trim().toUpperCase();
         if (!"MONTHLY".equals(plan) && !"YEARLY".equals(plan)) {
             throw new BadRequestException("Choose Monthly or Yearly");
@@ -175,7 +176,7 @@ public class CashfreePaymentService {
         if (paymentClaimRepository.findBySellerIdAndKindAndStatus(
                 seller.getId(), PaymentClaim.Kind.SUBSCRIPTION, PaymentClaim.Status.PENDING).isPresent()) {
             throw new BadRequestException(
-                    "A UPI subscription payment is already waiting for admin. Finish or cancel it before paying online.");
+                    "A subscription payment is already waiting for admin. Finish or cancel it before paying online.");
         }
 
         BigDecimal amount = subscriptionAmountFor(plan);
