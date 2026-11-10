@@ -9,6 +9,7 @@ import com.naturaldrops.entity.OrderStatusHistory;
 import com.naturaldrops.entity.User;
 import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.UnauthorizedException;
+import com.naturaldrops.service.CashfreePaymentService;
 import com.naturaldrops.service.OrderService;
 import com.naturaldrops.service.OrderPdfExportService;
 import com.naturaldrops.service.SellerNetworkService;
@@ -34,6 +35,7 @@ public class OrderController {
     private final OrderService orderService;
     private final OrderPdfExportService orderPdfExportService;
     private final SellerNetworkService sellerNetworkService;
+    private final CashfreePaymentService cashfreePaymentService;
     
     @GetMapping
     public ResponseEntity<ApiResponse<List<Order>>> getAllOrders(
@@ -209,7 +211,7 @@ public class OrderController {
     public ResponseEntity<ApiResponse<Order>> buyerCancelPending(
             @PathVariable Long id,
             HttpServletRequest httpRequest) {
-        Order order = orderService.buyerCancelPending(currentUser(httpRequest), id);
+        Order order = cashfreePaymentService.buyerCancelPendingWithOnlineRefund(currentUser(httpRequest), id);
         return ResponseEntity.ok(ApiResponse.success("Order canceled", order));
     }
     
@@ -298,7 +300,8 @@ public class OrderController {
         // }
         String canceledBy = payload.getOrDefault("canceledBy", "seller");
         String reason = payload.get("reason");
-        Order order = orderService.cancelOrder(id, canceledBy, reason);
+        // Refunds any applied Cashfree (Pay Now / online bill) payments, then cancels
+        Order order = cashfreePaymentService.cancelOrderWithOnlineRefund(id, canceledBy, reason);
         return ResponseEntity.ok(ApiResponse.success("Order canceled successfully", order));
     }
     

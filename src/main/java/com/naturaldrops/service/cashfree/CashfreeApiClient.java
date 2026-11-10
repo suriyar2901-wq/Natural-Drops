@@ -82,6 +82,30 @@ public class CashfreeApiClient {
         return get("/orders/" + cfOrderId);
     }
 
+    /**
+     * Create a refund against a Cashfree order (full or partial).
+     * Docs: POST /orders/{order_id}/refunds
+     */
+    public JsonNode createRefund(String cfOrderId, String refundId, BigDecimal amount, String note) {
+        properties.requireConfigured();
+        if (cfOrderId == null || cfOrderId.trim().isEmpty()) {
+            throw new BadRequestException("Cashfree order id is required for refund");
+        }
+        if (refundId == null || refundId.trim().isEmpty()) {
+            throw new BadRequestException("Refund id is required");
+        }
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Refund amount must be greater than zero");
+        }
+        Map<String, Object> body = new HashMap<String, Object>();
+        body.put("refund_amount", amount);
+        body.put("refund_id", refundId.trim());
+        if (note != null && !note.trim().isEmpty()) {
+            body.put("refund_note", note.trim());
+        }
+        return post("/orders/" + cfOrderId.trim() + "/refunds", body);
+    }
+
     private JsonNode post(String path, Object body) {
         try {
             HttpEntity<Object> entity = new HttpEntity<Object>(body, headers());

@@ -384,6 +384,89 @@ public class CashfreePaymentService {
     }
 
     /**
+     * When a seller/admin cancels an order that was paid online via Cashfree,
+     * refund each applied ORDER_BILL payment back to the buyer, then cancel the order.
+     */
+    @Transactional
+    public Order cancelOrderWithOnlineRefund(Long orderId, String canceledBy, String reason) {
+        if (orderId == null) {
+            throw new BadRequestException("Order id is required");
+        }
+        BigDecimal refunded = refundAppliedOrderBillPayments(orderId, reason);
+        orderService.cancelOrder(orderId, canceledBy, reason);
+        if (refunded.compareTo(BigDecimal.ZERO) > 0) {
+            orderService.clearPaymentAfterOnlineRefund(orderId);
+            log.info("Order #{} canceled with Cashfree refund total={}", orderId, refunded);
+        }
+        return orderService.getOrderById(orderId);
+    }
+
+    /** Buyer cancels a pending order; refunds Cashfree Pay Now if already applied. */
+    @Transactional
+    public Order buyerCancelPendingWithOnlineRefund(User buyer, Long orderId) {
+        orderService.assertOwnedPendingOrder(buyer, orderId);
+        BigDecimal refunded = refundAppliedOrderBillPayments(orderId, "Buyer canceled pending order");
+        orderService.buyerCancelPending(buyer, orderId);
+        if (refunded.compareTo(BigDecimal.ZERO) > 0) {
+            orderService.clearPaymentAfterOnlineRefund(orderId);
+            log.info("Buyer canceled order #{} with Cashfree refund total={}", orderId, refunded);
+        }
+        return orderService.getOrderById(orderId);
+    }
+
+    /**
+     * Refunds every applied Cashfree ORDER_BILL payment for this Natural Drops order.
+     * Idempotent for rows already marked REFUNDED.
+     * @return total amount refunded in this call
+     */
+    @Transactional
+    public BigDecimal refundAppliedOrderBillPayments(Long naturalDropsOrderId, String reason) {
+        List<CashfreePayment> payments = cashfreePaymentRepository
+                .findByOrderIdAndPurposeAndPaymentAppliedTrueOrderByCreatedAtAsc(
+                        naturalDropsOrderId, CashfreePayment.Purpose.ORDER_BILL);
+        BigDecimal totalRefunded = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        if (payments == null || payments.isEmpty()) {
+            return totalRefunded;
+        }
+        String note = reason == null || reason.trim().isEmpty()
+                ? "Order #" + naturalDropsOrderId + " canceled — online payment refund"
+                : ("Order #" + naturalDropsOrderId + " canceled — " + reason.trim());
+
+        for (CashfreePayment payment : payments) {
+            if (payment.getStatus() == CashfreePayment.Status.REFUNDED
+                    && payment.getRefundId() != null
+                    && !payment.getRefundId().trim().isEmpty()) {
+                continue;
+            }
+            BigDecimal amount = payment.getAmount() == null
+                    ? BigDecimal.ZERO
+                    : payment.getAmount().setScale(2, RoundingMode.HALF_UP);
+            if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            String refundId = "NDR" + naturalDropsOrderId + "P" + payment.getId() + "T"
+                    + System.currentTimeMillis();
+            if (refundId.length() > 50) {
+                refundId = refundId.substring(0, 50);
+            }
+            JsonNode response = cashfreeApiClient.createRefund(
+                    payment.getCfOrderId(), refundId, amount, note);
+            payment.setRefundId(refundId);
+            payment.setRefundAmount(amount);
+            payment.setRefundStatus(text(response, "refund_status") != null
+                    ? text(response, "refund_status")
+                    : "PENDING");
+            payment.setRefundedAt(LocalDateTime.now());
+            payment.setStatus(CashfreePayment.Status.REFUNDED);
+            cashfreePaymentRepository.save(payment);
+            totalRefunded = totalRefunded.add(amount);
+            log.info("Cashfree refund created: ndOrderId={} cfOrderId={} refundId={} amount={}",
+                    naturalDropsOrderId, payment.getCfOrderId(), refundId, amount);
+        }
+        return totalRefunded;
+    }
+
+    /**
      * Caller must hold a pessimistic lock on {@code locked} (and this method locks the ND order).
      * Applies ledger + order update at most once; uses min(stored amount, current unpaid balance).
      */

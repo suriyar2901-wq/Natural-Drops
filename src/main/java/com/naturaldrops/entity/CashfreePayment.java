@@ -31,7 +31,8 @@ public class CashfreePayment {
         FAILED,
         EXPIRED,
         USER_DROPPED,
-        CANCELLED
+        CANCELLED,
+        REFUNDED
     }
 
     public enum Purpose {
@@ -99,6 +100,19 @@ public class CashfreePayment {
 
     @Column(name = "applied_at")
     private LocalDateTime appliedAt;
+
+    /** Merchant refund id sent to Cashfree (unique per refund attempt). */
+    @Column(name = "refund_id", length = 64)
+    private String refundId;
+
+    @Column(name = "refund_amount", precision = 10, scale = 2)
+    private BigDecimal refundAmount;
+
+    @Column(name = "refund_status", length = 40)
+    private String refundStatus;
+
+    @Column(name = "refunded_at")
+    private LocalDateTime refundedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

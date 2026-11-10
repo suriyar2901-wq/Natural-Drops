@@ -649,6 +649,37 @@ public class OrderService {
         
         return updatedOrder;
     }
+
+    /**
+     * After Cashfree refunds succeed for a canceled order, clear payment fields so the bill shows unpaid/refunded.
+     */
+    @Transactional
+    public Order clearPaymentAfterOnlineRefund(Long orderId) {
+        Order order = getOrderById(orderId);
+        Order.PaymentStatus previous = order.getPaymentStatus();
+        BigDecimal previousPaid = amountAlreadyPaid(order,
+                order.getTotal() == null ? BigDecimal.ZERO : order.getTotal());
+        order.setPaymentStatus(Order.PaymentStatus.UNPAID);
+        order.setFinalBillAmount(null);
+        Order saved = orderRepository.save(order);
+        recordStatusChange(
+                orderId,
+                order.getStatus(),
+                order.getStatus(),
+                "system",
+                String.format(
+                        "Online payment refunded after cancel. Previous payment=%s paid=₹%s",
+                        previous,
+                        previousPaid.setScale(2, RoundingMode.HALF_UP).toPlainString()));
+        return saved;
+    }
+
+    /** Amount already collected on this bill (for seller bill display). */
+    @Transactional(readOnly = true)
+    public BigDecimal amountPaidOnBill(Order order) {
+        BigDecimal total = order == null || order.getTotal() == null ? BigDecimal.ZERO : order.getTotal();
+        return amountAlreadyPaid(order, total);
+    }
     
     @Transactional
     public Order updateOrderStatus(Long id, Order.OrderStatus status) {
@@ -874,6 +905,11 @@ public class OrderService {
             order.setFinalBillAmount(paid);
         }
         return orderRepository.save(order);
+    }
+
+    /** Public so cancel+refund orchestration can validate before calling Cashfree. */
+    public Order assertOwnedPendingOrder(User buyer, Long id) {
+        return ownedPendingOrder(buyer, id);
     }
 
     private Order ownedPendingOrder(User buyer, Long id) {
