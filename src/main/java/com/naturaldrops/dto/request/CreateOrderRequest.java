@@ -33,6 +33,12 @@ public class CreateOrderRequest {
     private String deliveryTime;
 
     private String note;
+
+    /**
+     * Optional. Allowed: PAY_NOW, PAY_AFTER_DELIVERY.
+     * Missing / blank defaults to PAY_AFTER_DELIVERY in OrderService.
+     */
+    private String paymentTiming;
     
     @NotEmpty(message = "Order must contain at least one item")
     private List<OrderItemRequest> items;

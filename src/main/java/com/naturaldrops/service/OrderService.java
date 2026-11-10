@@ -142,6 +142,14 @@ public class OrderService {
     
     @Transactional
     public Order createOrder(CreateOrderRequest request) {
+        if (request == null) {
+            throw new BadRequestException("Order details are required");
+        }
+        if (request.getBuyerId() == null) {
+            throw new BadRequestException("Buyer ID is required");
+        }
+        Order.PaymentTiming paymentTiming = resolvePaymentTiming(request.getPaymentTiming());
+
         Order order = new Order();
         order.setBuyerId(request.getBuyerId());
         order.setBuyerName(request.getBuyerName());
@@ -165,31 +173,42 @@ public class OrderService {
             order.setBillingNotes(request.getNote().trim());
         }
         order.setStatus(Order.OrderStatus.pending);
+        order.setPaymentStatus(Order.PaymentStatus.UNPAID);
+        order.setPaymentTiming(paymentTiming);
         order.setOrderDate(LocalDateTime.now());
         applyBuyerDeliverySlot(order, request);
         
-        // Add order items
+        // Add order items — prefer server menu rates when menuItemId is present
         BigDecimal itemsSubtotal = BigDecimal.ZERO;
         for (CreateOrderRequest.OrderItemRequest itemRequest : request.getItems()) {
+            if (itemRequest.getQuantity() == null || itemRequest.getQuantity() <= 0) {
+                throw new BadRequestException("Each item needs a quantity greater than 0");
+            }
+            MenuItem menuItem = null;
+            if (itemRequest.getMenuItemId() != null) {
+                menuItem = menuService.getMenuItemById(itemRequest.getMenuItemId());
+            }
+            BigDecimal rate = resolveItemRate(itemRequest, menuItem);
+            String itemName = resolveItemName(itemRequest, menuItem);
+            BigDecimal lineSubtotal = rate.multiply(BigDecimal.valueOf(itemRequest.getQuantity()))
+                    .setScale(2, RoundingMode.HALF_UP);
+
             OrderItem orderItem = new OrderItem();
             orderItem.setMenuItemId(itemRequest.getMenuItemId());
-            orderItem.setItemName(itemRequest.getItemName());
+            orderItem.setItemName(itemName);
             orderItem.setQuantity(itemRequest.getQuantity());
-            orderItem.setRate(itemRequest.getRate());
-            orderItem.setCartQuantity(itemRequest.getCartQuantity());
-            orderItem.setSubtotal(itemRequest.getSubtotal());
+            orderItem.setRate(rate);
+            orderItem.setCartQuantity(
+                    itemRequest.getCartQuantity() != null ? itemRequest.getCartQuantity() : itemRequest.getQuantity());
+            orderItem.setSubtotal(lineSubtotal);
             order.addItem(orderItem);
-            if (itemRequest.getSubtotal() != null) {
-                itemsSubtotal = itemsSubtotal.add(itemRequest.getSubtotal());
-            } else if (itemRequest.getRate() != null && itemRequest.getQuantity() != null) {
-                itemsSubtotal = itemsSubtotal.add(
-                        itemRequest.getRate().multiply(BigDecimal.valueOf(itemRequest.getQuantity())));
-            }
+            itemsSubtotal = itemsSubtotal.add(lineSubtotal);
         }
         Long sellerUserId = order.getSellerUserId() != null
                 ? order.getSellerUserId()
                 : sellerNetworkService.sellerUserIdForBuyer(request.getBuyerId());
         order.setSellerUserId(sellerUserId);
+        // Client-supplied total is ignored; PricingService is the source of truth
         order.setTotal(pricingService.totalForBuyer(
                 request.getBuyerId(),
                 itemsSubtotal,
@@ -209,6 +228,43 @@ public class OrderService {
         }
         
         return savedOrder;
+    }
+
+    /**
+     * Missing / blank → PAY_AFTER_DELIVERY (backward compatible with older clients).
+     */
+    public Order.PaymentTiming resolvePaymentTiming(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return Order.PaymentTiming.PAY_AFTER_DELIVERY;
+        }
+        String value = raw.trim().toUpperCase();
+        try {
+            return Order.PaymentTiming.valueOf(value);
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException(
+                    "paymentTiming must be PAY_NOW or PAY_AFTER_DELIVERY");
+        }
+    }
+
+    private BigDecimal resolveItemRate(CreateOrderRequest.OrderItemRequest itemRequest, MenuItem menuItem) {
+        if (menuItem != null) {
+            if (menuItem.getRate() == null) {
+                throw new BadRequestException("Menu item has no price: " + itemRequest.getMenuItemId());
+            }
+            return menuItem.getRate();
+        }
+        if (itemRequest.getRate() == null || itemRequest.getRate().compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Item rate is required when menuItemId is missing");
+        }
+        return itemRequest.getRate();
+    }
+
+    private String resolveItemName(CreateOrderRequest.OrderItemRequest itemRequest, MenuItem menuItem) {
+        if (menuItem != null
+                && (itemRequest.getItemName() == null || itemRequest.getItemName().trim().isEmpty())) {
+            return menuItem.getName();
+        }
+        return itemRequest.getItemName();
     }
 
     private void applyBuyerDeliverySlot(Order order, CreateOrderRequest request) {

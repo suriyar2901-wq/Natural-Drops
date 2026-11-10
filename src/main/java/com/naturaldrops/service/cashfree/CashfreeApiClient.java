@@ -38,6 +38,17 @@ public class CashfreeApiClient {
             String customerPhone,
             String customerEmail,
             String customerName) {
+        return createOrder(cfOrderId, amount, customerId, customerPhone, customerEmail, customerName, null);
+    }
+
+    public JsonNode createOrder(
+            String cfOrderId,
+            BigDecimal amount,
+            String customerId,
+            String customerPhone,
+            String customerEmail,
+            String customerName,
+            String returnUrl) {
         properties.requireConfigured();
         Map<String, Object> customer = new HashMap<String, Object>();
         customer.put("customer_id", customerId);
@@ -54,6 +65,14 @@ public class CashfreeApiClient {
         body.put("order_amount", amount);
         body.put("order_currency", "INR");
         body.put("customer_details", customer);
+
+        // After pay, Cashfree redirects here instead of a blank thank-you page.
+        // Use {order_id} placeholder — Cashfree replaces it with the cf order id.
+        if (returnUrl != null && !returnUrl.trim().isEmpty()) {
+            Map<String, Object> meta = new HashMap<String, Object>();
+            meta.put("return_url", returnUrl.trim());
+            body.put("order_meta", meta);
+        }
 
         return post("/orders", body);
     }

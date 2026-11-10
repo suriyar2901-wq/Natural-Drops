@@ -98,6 +98,14 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_status", length = 20)
     private PaymentStatus paymentStatus;
+
+    /**
+     * When the buyer intends to pay. Nullable for historical rows created before dual payment.
+     * Null is treated as PAY_AFTER_DELIVERY by application code.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_timing", length = 30)
+    private PaymentTiming paymentTiming;
     
     @Column(name = "billed_by", length = 50)
     private String billedBy;
@@ -125,6 +133,11 @@ public class Order {
     
     public enum PaymentStatus {
         PAID, UNPAID, PARTIALLY_PAID
+    }
+
+    public enum PaymentTiming {
+        PAY_NOW,
+        PAY_AFTER_DELIVERY
     }
     
     public void addItem(OrderItem item) {

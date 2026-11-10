@@ -157,7 +157,29 @@ public class OrderController {
     }
     
     @PostMapping
-    public ResponseEntity<ApiResponse<Order>> createOrder(@Valid @RequestBody CreateOrderRequest request) {
+    public ResponseEntity<ApiResponse<Order>> createOrder(
+            @Valid @RequestBody CreateOrderRequest request,
+            HttpServletRequest httpRequest) {
+        User user = currentUser(httpRequest);
+        if (user == null) {
+            throw new UnauthorizedException("Not authenticated");
+        }
+        // Buyers may only create orders for themselves; admin/seller keep existing workflows
+        if (user.getRole() == User.UserRole.buyer) {
+            if (request.getBuyerId() != null && !user.getId().equals(request.getBuyerId())) {
+                throw new UnauthorizedException("You can place orders only for your own account");
+            }
+            request.setBuyerId(user.getId());
+            if (request.getBuyerName() == null || request.getBuyerName().trim().isEmpty()) {
+                request.setBuyerName(user.getFullName() != null && !user.getFullName().trim().isEmpty()
+                        ? user.getFullName().trim()
+                        : user.getUsername());
+            }
+            if ((request.getBuyerPhone() == null || request.getBuyerPhone().trim().isEmpty())
+                    && user.getPhone() != null) {
+                request.setBuyerPhone(user.getPhone());
+            }
+        }
         Order order = orderService.createOrder(request);
         return ResponseEntity.ok(ApiResponse.success("Order placed successfully", order));
     }

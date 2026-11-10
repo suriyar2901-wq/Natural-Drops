@@ -21,6 +21,7 @@ import com.naturaldrops.service.cashfree.CashfreeApiClient;
 import com.naturaldrops.service.cashfree.CashfreeSignatureVerifier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,6 +57,9 @@ public class CashfreePaymentService {
     private final SellerNetworkService sellerNetworkService;
     private final SellerAdminService sellerAdminService;
     private final SettingsService settingsService;
+
+    @Value("${app.base-url:http://localhost:8081}")
+    private String frontendBaseUrl;
 
     /**
      * Creates a Cashfree order for (part of) an unpaid Natural Drops bill.
@@ -124,7 +128,8 @@ public class CashfreePaymentService {
                 String.valueOf(buyer.getId()),
                 phone,
                 buyer.getEmail(),
-                name);
+                name,
+                buyerReturnUrl());
 
         String sessionId = text(cfResponse, "payment_session_id");
         String returnedOrderId = text(cfResponse, "order_id");
@@ -209,7 +214,8 @@ public class CashfreePaymentService {
                 String.valueOf(sellerUser.getId()),
                 phone,
                 sellerUser.getEmail() != null ? sellerUser.getEmail() : seller.getEmail(),
-                name);
+                name,
+                subscriptionReturnUrl());
 
         String sessionId = text(cfResponse, "payment_session_id");
         String returnedOrderId = text(cfResponse, "order_id");
@@ -700,5 +706,22 @@ public class CashfreePaymentService {
             return null;
         }
         return node.get(field).asText();
+    }
+
+    private String frontendBase() {
+        String base = frontendBaseUrl == null ? "http://localhost:8081" : frontendBaseUrl.trim();
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base;
+    }
+
+    /** Cashfree replaces {order_id} after payment and redirects back into the app. */
+    private String subscriptionReturnUrl() {
+        return frontendBase() + "/SellerSubscriptionPay?cf_order={order_id}";
+    }
+
+    private String buyerReturnUrl() {
+        return frontendBase() + "/BuyerApp/BuyerPayments?cf_order={order_id}";
     }
 }
