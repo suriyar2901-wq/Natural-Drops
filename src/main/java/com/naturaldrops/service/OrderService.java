@@ -368,6 +368,10 @@ public class OrderService {
         if (order.getStatus() == Order.OrderStatus.delivered || order.getStatus() == Order.OrderStatus.canceled) {
             throw new IllegalStateException("Delivered or canceled orders cannot be edited");
         }
+        if (order.getPaymentStatus() == Order.PaymentStatus.PAID) {
+            throw new IllegalStateException(
+                    "Fully paid orders cannot be edited. Cancel and refund if the order must change.");
+        }
         if (order.getStatus() != Order.OrderStatus.pending && order.getStatus() != Order.OrderStatus.confirmed) {
             throw new IllegalStateException("Only pending or confirmed orders can be edited");
         }
@@ -651,15 +655,19 @@ public class OrderService {
     }
 
     /**
-     * After Cashfree refunds succeed for a canceled order, clear payment fields so the bill shows unpaid/refunded.
+     * After Cashfree refunds succeed for a canceled order, mark bill as REFUNDED with amount (visible to buyer/seller).
      */
     @Transactional
-    public Order clearPaymentAfterOnlineRefund(Long orderId) {
+    public Order clearPaymentAfterOnlineRefund(Long orderId, BigDecimal refundedAmount) {
         Order order = getOrderById(orderId);
         Order.PaymentStatus previous = order.getPaymentStatus();
         BigDecimal previousPaid = amountAlreadyPaid(order,
                 order.getTotal() == null ? BigDecimal.ZERO : order.getTotal());
-        order.setPaymentStatus(Order.PaymentStatus.UNPAID);
+        BigDecimal refunded = refundedAmount == null
+                ? previousPaid
+                : refundedAmount.setScale(2, RoundingMode.HALF_UP);
+        order.setPaymentStatus(Order.PaymentStatus.REFUNDED);
+        order.setRefundedAmount(refunded);
         order.setFinalBillAmount(null);
         Order saved = orderRepository.save(order);
         recordStatusChange(
@@ -668,9 +676,9 @@ public class OrderService {
                 order.getStatus(),
                 "system",
                 String.format(
-                        "Online payment refunded after cancel. Previous payment=%s paid=₹%s",
+                        "Online payment refunded after cancel. Previous payment=%s refunded=₹%s",
                         previous,
-                        previousPaid.setScale(2, RoundingMode.HALF_UP).toPlainString()));
+                        refunded.toPlainString()));
         return saved;
     }
 
@@ -866,6 +874,10 @@ public class OrderService {
         if (order == null) {
             return BigDecimal.ZERO;
         }
+        if (order.getPaymentStatus() == Order.PaymentStatus.REFUNDED
+                || order.getStatus() == Order.OrderStatus.canceled) {
+            return BigDecimal.ZERO;
+        }
         BigDecimal total = order.getTotal() == null ? BigDecimal.ZERO : order.getTotal();
         BigDecimal already = amountAlreadyPaid(order, total);
         BigDecimal balance = total.subtract(already);
@@ -923,6 +935,10 @@ public class OrderService {
         if (order.getStatus() != Order.OrderStatus.pending) {
             throw new BadRequestException("Only a pending order can be changed");
         }
+        if (order.getPaymentStatus() == Order.PaymentStatus.PAID) {
+            throw new BadRequestException(
+                    "This order is fully paid. Cancel it to get a refund if you need to change items.");
+        }
         return order;
     }
 
@@ -940,6 +956,9 @@ public class OrderService {
     }
 
     private BigDecimal amountAlreadyPaid(Order order, BigDecimal total) {
+        if (order.getPaymentStatus() == Order.PaymentStatus.REFUNDED) {
+            return BigDecimal.ZERO;
+        }
         if (order.getPaymentStatus() == Order.PaymentStatus.PAID) {
             return total;
         }

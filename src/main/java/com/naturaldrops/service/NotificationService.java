@@ -192,6 +192,47 @@ public class NotificationService {
         }
     }
     
+    /**
+     * Dedicated refund notice after Cashfree online payment is refunded on cancel.
+     */
+    @Transactional
+    public void createBuyerRefundNotification(Order order, BigDecimal amount) {
+        if (order == null || order.getBuyerId() == null) {
+            return;
+        }
+        BigDecimal refunded = amount == null ? BigDecimal.ZERO : amount;
+        String amountLabel = "₹" + refunded.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+        String title = "Refund started";
+        String message = "Order #" + order.getId() + " canceled. " + amountLabel
+                + " online payment refund started to your original payment method (usually 3–7 bank days).";
+
+        BuyerNotification notification = new BuyerNotification();
+        notification.setBuyerId(order.getBuyerId());
+        notification.setOrderId(order.getId());
+        notification.setMessage(message);
+        notification.setIsRead(false);
+        notification.setCreatedAt(LocalDateTime.now());
+        buyerNotificationRepository.save(notification);
+
+        try {
+            Map<String, Object> notificationData = new HashMap<>();
+            notificationData.put("orderId", order.getId());
+            notificationData.put("status", Order.OrderStatus.canceled.toString());
+            notificationData.put("paymentStatus", Order.PaymentStatus.REFUNDED.toString());
+            notificationData.put("refundedAmount", refunded.toPlainString());
+            notificationData.put("type", "refund");
+            pushNotificationService.sendNotificationToBuyer(
+                    order.getBuyerId(),
+                    title,
+                    message,
+                    notificationData
+            );
+        } catch (Exception e) {
+            System.err.println("Failed to send refund push notification: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     @Transactional
     public void createBuyerBillUpdatedNotification(Order order, BigDecimal previousAmount) {
         BuyerNotification notification = new BuyerNotification();

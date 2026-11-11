@@ -57,6 +57,7 @@ public class CashfreePaymentService {
     private final SellerNetworkService sellerNetworkService;
     private final SellerAdminService sellerAdminService;
     private final SettingsService settingsService;
+    private final NotificationService notificationService;
 
     @Value("${app.base-url:http://localhost:8081}")
     private String frontendBaseUrl;
@@ -384,34 +385,71 @@ public class CashfreePaymentService {
     }
 
     /**
-     * When a seller/admin cancels an order that was paid online via Cashfree,
-     * refund each applied ORDER_BILL payment back to the buyer, then cancel the order.
+     * Seller/admin cancel. Auto Cashfree refund only while order is still {@code pending}
+     * (before seller confirm). After confirm, cancel keeps the online payment — no refund.
      */
     @Transactional
     public Order cancelOrderWithOnlineRefund(Long orderId, String canceledBy, String reason) {
         if (orderId == null) {
             throw new BadRequestException("Order id is required");
         }
-        BigDecimal refunded = refundAppliedOrderBillPayments(orderId, reason);
+        Order before = orderService.getOrderById(orderId);
+        boolean refundEligible = before.getStatus() == Order.OrderStatus.pending;
+        BigDecimal refunded = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        if (refundEligible) {
+            refunded = refundAppliedOrderBillPayments(orderId, reason);
+        } else {
+            log.info(
+                    "Order #{} cancel without Cashfree refund (status={} — refund only before seller confirm)",
+                    orderId,
+                    before.getStatus());
+        }
         orderService.cancelOrder(orderId, canceledBy, reason);
         if (refunded.compareTo(BigDecimal.ZERO) > 0) {
-            orderService.clearPaymentAfterOnlineRefund(orderId);
+            Order cleared = orderService.clearPaymentAfterOnlineRefund(orderId, refunded);
+            notifyBuyerAndSellerOfRefund(cleared, refunded);
             log.info("Order #{} canceled with Cashfree refund total={}", orderId, refunded);
         }
         return orderService.getOrderById(orderId);
     }
 
-    /** Buyer cancels a pending order; refunds Cashfree Pay Now if already applied. */
+    /**
+     * Buyer cancels a pending order only. Refunds Cashfree Pay Now if already applied
+     * (always pending here — seller has not confirmed yet).
+     */
     @Transactional
     public Order buyerCancelPendingWithOnlineRefund(User buyer, Long orderId) {
         orderService.assertOwnedPendingOrder(buyer, orderId);
         BigDecimal refunded = refundAppliedOrderBillPayments(orderId, "Buyer canceled pending order");
         orderService.buyerCancelPending(buyer, orderId);
         if (refunded.compareTo(BigDecimal.ZERO) > 0) {
-            orderService.clearPaymentAfterOnlineRefund(orderId);
+            Order cleared = orderService.clearPaymentAfterOnlineRefund(orderId, refunded);
+            notifyBuyerAndSellerOfRefund(cleared, refunded);
             log.info("Buyer canceled order #{} with Cashfree refund total={}", orderId, refunded);
         }
         return orderService.getOrderById(orderId);
+    }
+
+    private void notifyBuyerAndSellerOfRefund(Order order, BigDecimal refunded) {
+        if (order == null || refunded == null || refunded.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        String amountLabel = "₹" + refunded.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        try {
+            notificationService.createBuyerRefundNotification(order, refunded);
+        } catch (Exception e) {
+            log.warn("Buyer refund notification failed for order #{}: {}", order.getId(), e.getMessage());
+        }
+        try {
+            sellerNetworkService.postInboxMessage(
+                    order.getSellerUserId(),
+                    order.getBuyerId(),
+                    "Online refund started",
+                    "Order #" + order.getId() + ": " + amountLabel
+                            + " Cashfree online payment refund started to the buyer.");
+        } catch (Exception e) {
+            log.warn("Seller refund inbox failed for order #{}: {}", order.getId(), e.getMessage());
+        }
     }
 
     /**

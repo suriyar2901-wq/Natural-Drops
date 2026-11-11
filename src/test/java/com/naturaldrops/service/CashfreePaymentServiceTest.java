@@ -56,6 +56,7 @@ class CashfreePaymentServiceTest {
     @Mock private SellerNetworkService sellerNetworkService;
     @Mock private SellerAdminService sellerAdminService;
     @Mock private SettingsService settingsService;
+    @Mock private NotificationService notificationService;
 
     @InjectMocks
     private CashfreePaymentService service;
@@ -111,7 +112,7 @@ class CashfreePaymentServiceTest {
         cf.put("order_id", "ND50T1");
         cf.put("payment_session_id", "session_abc");
         cf.put("order_status", "ACTIVE");
-        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("75.50")), anyString(), anyString(), any(), anyString()))
+        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("75.50")), anyString(), anyString(), any(), anyString(), any()))
                 .thenReturn(cf);
         when(cashfreePaymentRepository.save(any(CashfreePayment.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -120,7 +121,7 @@ class CashfreePaymentServiceTest {
         assertEquals("session_abc", result.get("paymentSessionId"));
         assertEquals(new BigDecimal("75.50"), result.get("amount"));
         verify(shopService).assertBuyerCanPayOrder(11L, 50L, new BigDecimal("75.50"));
-        verify(cashfreeApiClient).createOrder(anyString(), eq(new BigDecimal("75.50")), eq("11"), anyString(), any(), anyString());
+        verify(cashfreeApiClient).createOrder(anyString(), eq(new BigDecimal("75.50")), eq("11"), anyString(), any(), anyString(), any());
     }
 
     @Test
@@ -137,14 +138,14 @@ class CashfreePaymentServiceTest {
         cf.put("order_id", "ND50PARTIALAMT");
         cf.put("payment_session_id", "session_200");
         cf.put("order_status", "ACTIVE");
-        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("200.00")), anyString(), anyString(), any(), anyString()))
+        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("200.00")), anyString(), anyString(), any(), anyString(), any()))
                 .thenReturn(cf);
         when(cashfreePaymentRepository.save(any(CashfreePayment.class))).thenAnswer(inv -> inv.getArgument(0));
 
         Map<String, Object> result = service.createOrderForBuyer(buyer, 50L, new BigDecimal("200.00"));
 
         assertEquals(new BigDecimal("200.00"), result.get("amount"));
-        verify(cashfreeApiClient).createOrder(anyString(), eq(new BigDecimal("200.00")), eq("11"), anyString(), any(), anyString());
+        verify(cashfreeApiClient).createOrder(anyString(), eq(new BigDecimal("200.00")), eq("11"), anyString(), any(), anyString(), any());
     }
 
     @Test
@@ -153,7 +154,7 @@ class CashfreePaymentServiceTest {
         when(orderService.unpaidBillBalance(order)).thenReturn(new BigDecimal("335.00"));
         assertThrows(BadRequestException.class,
                 () -> service.createOrderForBuyer(buyer, 50L, new BigDecimal("400.00")));
-        verify(cashfreeApiClient, never()).createOrder(anyString(), any(), anyString(), anyString(), any(), anyString());
+        verify(cashfreeApiClient, never()).createOrder(anyString(), any(), anyString(), anyString(), any(), anyString(), any());
     }
 
     @Test
@@ -163,7 +164,7 @@ class CashfreePaymentServiceTest {
         when(paymentClaimRepository.findByOrderIdAndStatus(50L, PaymentClaim.Status.PENDING))
                 .thenReturn(Optional.of(new PaymentClaim()));
         assertThrows(BadRequestException.class, () -> service.createOrderForBuyer(buyer, 50L));
-        verify(cashfreeApiClient, never()).createOrder(anyString(), any(), anyString(), anyString(), any(), anyString());
+        verify(cashfreeApiClient, never()).createOrder(anyString(), any(), anyString(), anyString(), any(), anyString(), any());
     }
 
     @Test
@@ -281,7 +282,7 @@ class CashfreePaymentServiceTest {
         cf.put("order_id", "ND50PARTIAL");
         cf.put("payment_session_id", "session_p");
         cf.put("order_status", "ACTIVE");
-        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("150.00")), anyString(), anyString(), any(), anyString()))
+        when(cashfreeApiClient.createOrder(anyString(), eq(new BigDecimal("150.00")), anyString(), anyString(), any(), anyString(), any()))
                 .thenReturn(cf);
         when(cashfreePaymentRepository.save(any(CashfreePayment.class))).thenAnswer(inv -> inv.getArgument(0));
 

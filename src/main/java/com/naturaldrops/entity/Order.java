@@ -94,6 +94,10 @@ public class Order {
     
     @Column(name = "final_bill_amount", precision = 10, scale = 2)
     private BigDecimal finalBillAmount;
+
+    /** Total Cashfree amount refunded after cancel (null if never refunded online). */
+    @Column(name = "refunded_amount", precision = 10, scale = 2)
+    private BigDecimal refundedAmount;
     
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_status", length = 20)
@@ -132,7 +136,7 @@ public class Order {
     }
     
     public enum PaymentStatus {
-        PAID, UNPAID, PARTIALLY_PAID
+        PAID, UNPAID, PARTIALLY_PAID, REFUNDED
     }
 
     public enum PaymentTiming {

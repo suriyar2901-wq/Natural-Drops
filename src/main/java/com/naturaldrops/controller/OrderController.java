@@ -212,7 +212,7 @@ public class OrderController {
             @PathVariable Long id,
             HttpServletRequest httpRequest) {
         Order order = cashfreePaymentService.buyerCancelPendingWithOnlineRefund(currentUser(httpRequest), id);
-        return ResponseEntity.ok(ApiResponse.success("Order canceled", order));
+        return ResponseEntity.ok(ApiResponse.success(cancelSuccessMessage(order), order));
     }
     
     @PutMapping("/{id}/status")
@@ -302,7 +302,7 @@ public class OrderController {
         String reason = payload.get("reason");
         // Refunds any applied Cashfree (Pay Now / online bill) payments, then cancels
         Order order = cashfreePaymentService.cancelOrderWithOnlineRefund(id, canceledBy, reason);
-        return ResponseEntity.ok(ApiResponse.success("Order canceled successfully", order));
+        return ResponseEntity.ok(ApiResponse.success(cancelSuccessMessage(order), order));
     }
     
     /**
@@ -327,6 +327,18 @@ public class OrderController {
 
     private User currentUser(HttpServletRequest request) {
         return (User) request.getAttribute("currentUser");
+    }
+
+    private String cancelSuccessMessage(Order order) {
+        if (order != null
+                && order.getRefundedAmount() != null
+                && order.getRefundedAmount().compareTo(java.math.BigDecimal.ZERO) > 0) {
+            String amount = order.getRefundedAmount()
+                    .setScale(2, java.math.RoundingMode.HALF_UP)
+                    .toPlainString();
+            return "Order canceled. ₹" + amount + " online payment refund started.";
+        }
+        return "Order canceled successfully";
     }
 
     private List<Order> ordersForBuyer(List<Order> orders, User user) {

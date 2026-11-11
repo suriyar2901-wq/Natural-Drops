@@ -72,4 +72,22 @@ class OrderUnpaidBalanceTest {
         order.setFinalBillAmount(new BigDecimal("100.00"));
         assertEquals(0, BigDecimal.ZERO.compareTo(orderService.unpaidBillBalance(order)));
     }
+
+    @Test
+    void refundedHasZeroBalance() {
+        Order order = new Order();
+        order.setTotal(new BigDecimal("100.00"));
+        order.setPaymentStatus(Order.PaymentStatus.REFUNDED);
+        order.setRefundedAmount(new BigDecimal("100.00"));
+        assertEquals(0, BigDecimal.ZERO.compareTo(orderService.unpaidBillBalance(order)));
+    }
+
+    @Test
+    void canceledHasZeroBalanceEvenIfUnpaidStatus() {
+        Order order = new Order();
+        order.setTotal(new BigDecimal("100.00"));
+        order.setStatus(Order.OrderStatus.canceled);
+        order.setPaymentStatus(Order.PaymentStatus.UNPAID);
+        assertEquals(0, BigDecimal.ZERO.compareTo(orderService.unpaidBillBalance(order)));
+    }
 }
