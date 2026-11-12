@@ -12,7 +12,9 @@ import com.naturaldrops.exception.BadRequestException;
 import com.naturaldrops.exception.ResourceNotFoundException;
 import com.naturaldrops.exception.UnauthorizedException;
 import com.naturaldrops.entity.CashfreePayment;
+import com.naturaldrops.entity.Order;
 import com.naturaldrops.repository.CashfreePaymentRepository;
+import com.naturaldrops.repository.OrderRepository;
 import com.naturaldrops.repository.PaymentClaimRepository;
 import com.naturaldrops.repository.SellerRepository;
 import com.naturaldrops.repository.SellerSubscriptionRepository;
@@ -39,6 +41,7 @@ public class PaymentClaimService {
 
     private final PaymentClaimRepository claimRepository;
     private final CashfreePaymentRepository cashfreePaymentRepository;
+    private final OrderRepository orderRepository;
     private final SellerRepository sellerRepository;
     private final SellerSubscriptionRepository subscriptionRepository;
     private final UserRepository userRepository;
@@ -135,13 +138,18 @@ public class PaymentClaimService {
             throw new BadRequestException("Select the unpaid bill you are paying");
         }
         Long orderId = toLong(body.get("orderId"));
-        if (claimRepository.findByOrderIdAndStatus(orderId, PaymentClaim.Status.PENDING).isPresent()) {
+        // Idempotent: same buyer already told the seller — return existing pending claim.
+        java.util.Optional<PaymentClaim> existingPending =
+                claimRepository.findByOrderIdAndStatus(orderId, PaymentClaim.Status.PENDING);
+        if (existingPending.isPresent()) {
+            PaymentClaim existing = existingPending.get();
+            if (buyer.getId().equals(existing.getClaimantUserId())) {
+                return existing;
+            }
             throw new BadRequestException("This bill already has a payment waiting for the seller");
         }
-        if (cashfreePaymentRepository.existsByOrderIdAndStatusIn(orderId, OPEN_CASHFREE)) {
-            throw new BadRequestException(
-                    "A Cashfree payment is already in progress for this bill. Finish or abandon it before claiming UPI.");
-        }
+        // Unfinished Cashfree checkout should not block manual UPI — expire open sessions (not applied).
+        abandonOpenCashfreeForOrder(orderId);
         // Prior partial Cashfree payments are fine — assertBuyerCanPayOrder enforces remaining balance.
         BigDecimal amount = parseAmount(body.get("amount"));
         shopService.assertBuyerCanPayOrder(buyer.getId(), orderId, amount);
@@ -154,9 +162,20 @@ public class PaymentClaimService {
             throw new BadRequestException("UTR must be at least 6 characters, or leave it blank");
         }
         Long sellerUserId = sellerNetworkService.sellerUserIdForBuyer(buyer.getId());
+        Order billOrder = orderRepository.findById(orderId).orElse(null);
+        if (sellerUserId == null && billOrder != null) {
+            sellerUserId = billOrder.getSellerUserId();
+        }
         Seller seller = null;
         if (buyer.getLinkedSellerId() != null) {
             seller = sellerNetworkService.findSellerById(buyer.getLinkedSellerId());
+        }
+        if (seller == null && sellerUserId != null) {
+            seller = sellerRepository.findByUserId(sellerUserId).orElse(null);
+        }
+        if (sellerUserId == null) {
+            throw new BadRequestException(
+                    "This bill is not linked to a seller shop yet. Contact the seller, then try again.");
         }
         PaymentClaim claim = new PaymentClaim();
         claim.setKind(PaymentClaim.Kind.ORDER_BILL);
@@ -376,6 +395,30 @@ public class PaymentClaimService {
             return new BigDecimal(raw.trim()).setScale(2, BigDecimal.ROUND_HALF_UP);
         } catch (Exception ex) {
             throw new BadRequestException("Plan amount is not configured correctly");
+        }
+    }
+
+    /**
+     * Expire unfinished Cashfree ORDER_BILL sessions so the buyer can claim manual UPI instead.
+     * Never touches rows already applied to the bill.
+     */
+    private void abandonOpenCashfreeForOrder(Long orderId) {
+        if (orderId == null) {
+            return;
+        }
+        List<CashfreePayment> open = cashfreePaymentRepository.findByOrderIdAndStatusIn(orderId, OPEN_CASHFREE);
+        if (open == null || open.isEmpty()) {
+            return;
+        }
+        for (CashfreePayment payment : open) {
+            if (Boolean.TRUE.equals(payment.getPaymentApplied())) {
+                continue;
+            }
+            if (payment.getPurpose() != null && payment.getPurpose() != CashfreePayment.Purpose.ORDER_BILL) {
+                continue;
+            }
+            payment.setStatus(CashfreePayment.Status.EXPIRED);
+            cashfreePaymentRepository.save(payment);
         }
     }
 
